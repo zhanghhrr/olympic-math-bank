@@ -1,0 +1,229 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 用户角色
+enum UserRole {
+  ADMIN
+  REVIEWER
+  EDITOR
+}
+
+// 题目类型
+enum QuestionType {
+  SINGLE_CHOICE    // 单选题
+  MULTI_CHOICE     // 多选题
+  FILL_BLANK       // 填空题
+  SOLUTION         // 解答题
+  PROOF            // 证明题
+}
+
+// 题目状态
+enum QuestionStatus {
+  DRAFT     // 草稿
+  PENDING   // 待审核
+  APPROVED  // 已通过
+  REJECTED  // 已拒绝
+}
+
+// 年级
+enum Grade {
+  P1  // 小学一年级
+  P2  // 小学二年级
+  P3  // 小学三年级
+  P4  // 小学四年级
+  P5  // 小学五年级
+  P6  // 小学六年级
+}
+
+// 标签类型
+enum TagType {
+  GRADE       // 年级
+  DIFFICULTY  // 难度
+  KNOWLEDGE   // 知识点（四级）
+  COMPETITION // 竞赛类型
+}
+
+// 导入任务状态
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// 用户表
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String
+  role          UserRole  @default(EDITOR)
+  password      String?   // 可选，支持 OAuth
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // 关联
+  questions     Question[]
+  reviews       Review[]
+  importJobs    ImportJob[]
+  versions      QuestionVersion[]
+
+  @@map("users")
+}
+
+// 题目表
+model Question {
+  id              String          @id @default(uuid())
+  content         String
+  answer          String
+  solution        String?
+  type            QuestionType
+  options         String?         // JSON string for SQLite
+  grade           Grade
+  difficulty      Int
+  source          String?         // 题目来源
+  year            Int?            // 年份
+  competition     String?         // 竞赛类型
+  status          QuestionStatus  @default(DRAFT)
+  
+  // 外键
+  createdById     String
+  createdBy       User            @relation(fields: [createdById], references: [id])
+  currentVersionId String?        @unique
+  
+  // 关联
+  images          QuestionImage[]
+  tags            QuestionTag[]
+  reviews         Review[]
+  versions        QuestionVersion[]
+  importItems     ImportJobItem[]
+  
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@map("questions")
+}
+
+// 题目版本表
+model QuestionVersion {
+  id          String    @id @default(uuid())
+  questionId  String
+  question    Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  version     Int
+  content     String
+  answer      String
+  solution    String?
+  options     String?   // JSON string for SQLite
+  changeLog   String    // 修改说明
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@unique([questionId, version])
+  @@map("question_versions")
+}
+
+// 题目图片表
+model QuestionImage {
+  id              String    @id @default(uuid())
+  questionId      String?
+  question        Question? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  url             String    // 文件路径
+  ocrText         String?
+  ocrConfidence   Float?
+  order           Int       @default(0)
+  status          ImportStatus @default(PENDING)
+  createdAt       DateTime  @default(now())
+
+  @@map("question_images")
+}
+
+// 标签表
+model Tag {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  type        TagType
+  parentId    String?
+  parent      Tag?      @relation("TagHierarchy", fields: [parentId], references: [id])
+  children    Tag[]     @relation("TagHierarchy")
+  description String?
+  order       Int       @default(0)
+  
+  // 关联
+  questions   QuestionTag[]
+  
+  createdAt   DateTime  @default(now())
+
+  @@map("tags")
+}
+
+// 题目标签关联表
+model QuestionTag {
+  questionId  String
+  question    Question  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  tagId       String
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([questionId, tagId])
+  @@map("question_tags")
+}
+
+// 审核表
+model Review {
+  id          String          @id @default(uuid())
+  questionId  String
+  question    Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  reviewerId  String
+  reviewer    User            @relation(fields: [reviewerId], references: [id])
+  status      QuestionStatus  // APPROVED or REJECTED
+  comment     String?
+  createdAt   DateTime        @default(now())
+
+  @@map("reviews")
+}
+
+// 导入任务表
+model ImportJob {
+  id              String          @id @default(uuid())
+  type            String          // IMAGE or PDF
+  fileUrl         String
+  fileName        String
+  status          ImportStatus    @default(PENDING)
+  totalItems      Int             @default(0)
+  processedItems  Int             @default(0)
+  failedItems     Int             @default(0)
+  errorMessage    String?
+  createdById     String
+  createdBy       User            @relation(fields: [createdById], references: [id])
+  
+  // 关联
+  items           ImportJobItem[]
+  
+  createdAt       DateTime        @default(now())
+  completedAt     DateTime?
+
+  @@map("import_jobs")
+}
+
+// 导入任务项表
+model ImportJobItem {
+  id              String          @id @default(uuid())
+  jobId           String
+  job             ImportJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  imageUrl        String
+  ocrResult       String?         // JSON string for SQLite
+  parsedData      String?         // JSON string for SQLite
+  status          ImportStatus    @default(PENDING)
+  questionId      String?
+  question        Question?       @relation(fields: [questionId], references: [id])
+  errorMessage    String?
+  createdAt       DateTime        @default(now())
+
+  @@map("import_job_items")
+}
