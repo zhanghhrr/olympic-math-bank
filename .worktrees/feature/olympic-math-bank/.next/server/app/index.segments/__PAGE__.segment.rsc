@@ -1,0 +1,5 @@
+1:"$Sreact.fragment"
+2:I[23561,["/_next/static/chunks/0vg8zw7uurkzx.js"],"OutletBoundary"]
+3:"$Sreact.suspense"
+0:{"rsc":["$","$1","c",{"children":[["$","div",null,{"className":"flex flex-col items-center justify-center min-h-screen bg-slate-50","children":["$","main",null,{"className":"text-center","children":[["$","h1",null,{"className":"text-4xl font-bold mb-4","children":"奥数题库管理系统"}],["$","p",null,{"className":"text-slate-600 mb-8","children":"面向教研人员的题库录入与管理系统"}],["$","button",null,{"className":"inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2","children":"开始使用"}]]}]}],null,["$","$L2",null,{"children":["$","$3",null,{"name":"Next.MetadataOutlet","children":"$@4"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"df1XbDabP9UTRroWbvrbt"}
+4:null
