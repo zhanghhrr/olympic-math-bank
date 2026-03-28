@@ -16,11 +16,11 @@ import { signOut } from 'next-auth/react';
 
 const navigation = [
   { name: '仪表盘', href: '/dashboard', icon: LayoutDashboard },
-  { name: '题目管理', href: '/dashboard/questions', icon: BookOpen },
-  { name: '导入题目', href: '/dashboard/import', icon: Upload },
-  { name: '审核中心', href: '/dashboard/review', icon: CheckCircle },
-  { name: '标签管理', href: '/dashboard/tags', icon: Tags },
-  { name: '系统设置', href: '/dashboard/settings', icon: Settings },
+  { name: '题目管理', href: '/questions', icon: BookOpen },
+  { name: '导入题目', href: '/import', icon: Upload },
+  { name: '审核中心', href: '/review', icon: CheckCircle },
+  { name: '标签管理', href: '/tags', icon: Tags },
+  { name: '系统设置', href: '/settings', icon: Settings },
 ];
 
 export function Sidebar({ user }: { user: any }) {

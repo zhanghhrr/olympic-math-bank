@@ -45,7 +45,11 @@ enum Grade {
 enum TagType {
   GRADE       // 年级
   DIFFICULTY  // 难度
-  KNOWLEDGE   // 知识点（四级）
+  MODULE      // 一级模块
+  TOPIC       // 二级主题
+  SUBTOPIC    // 三级子主题
+  KNOWLEDGE   // 四级知识点
+  SKILL       // 五级技能点
   COMPETITION // 竞赛类型
 }
 
@@ -100,6 +104,7 @@ model Question {
   // 关联
   images          QuestionImage[]
   tags            QuestionTag[]
+  knowledgeTags   QuestionKnowledgeTag[]
   reviews         Review[]
   versions        QuestionVersion[]
   importItems     ImportJobItem[]
@@ -144,20 +149,51 @@ model QuestionImage {
   @@map("question_images")
 }
 
-// 标签表
+// 五级知识树标签表
+model KnowledgeTag {
+  id          String    @id @default(uuid())
+  name        String    // 标签名称
+  type        TagType   // 标签类型：MODULE, TOPIC, SUBTOPIC, KNOWLEDGE, SKILL
+  level       Int       // 层级：1-5
+  parentId    String?   // 父标签ID
+  parent      KnowledgeTag?  @relation("KnowledgeHierarchy", fields: [parentId], references: [id])
+  children    KnowledgeTag[] @relation("KnowledgeHierarchy")
+  fullPath    String    // 完整路径，如：计算模块/整数/整数加减/整数加法运算/加法横式
+  description String?   // 描述
+  order       Int       @default(0)  // 排序
+
+  // 关联
+  questions   QuestionKnowledgeTag[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([name, type, parentId])
+  @@map("knowledge_tags")
+}
+
+// 题目与五级知识标签关联表
+model QuestionKnowledgeTag {
+  questionId      String
+  question        Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  knowledgeTagId  String
+  knowledgeTag    KnowledgeTag  @relation(fields: [knowledgeTagId], references: [id], onDelete: Cascade)
+
+  @@id([questionId, knowledgeTagId])
+  @@map("question_knowledge_tags")
+}
+
+// 传统标签表（保留用于年级、难度、竞赛类型等）
 model Tag {
   id          String    @id @default(uuid())
   name        String    @unique
   type        TagType
-  parentId    String?
-  parent      Tag?      @relation("TagHierarchy", fields: [parentId], references: [id])
-  children    Tag[]     @relation("TagHierarchy")
   description String?
   order       Int       @default(0)
-  
+
   // 关联
   questions   QuestionTag[]
-  
+
   createdAt   DateTime  @default(now())
 
   @@map("tags")

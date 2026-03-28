@@ -17,17 +17,41 @@ export async function GET(request: NextRequest) {
   const grade = searchParams.get('grade');
   const difficulty = searchParams.get('difficulty');
   const search = searchParams.get('search');
+  const createdById = searchParams.get('createdById');
+  const tagIds = searchParams.get('tagIds');
+  const knowledgeTagIds = searchParams.get('knowledgeTagIds');
 
   const where: any = {};
   if (status) where.status = status;
   if (type) where.type = type;
   if (grade) where.grade = grade;
   if (difficulty) where.difficulty = parseInt(difficulty);
+  if (createdById) where.createdById = createdById;
   if (search) {
     where.OR = [
       { content: { contains: search } },
       { source: { contains: search } },
     ];
+  }
+
+  // 标签筛选
+  if (tagIds) {
+    const tagIdArray = tagIds.split(',');
+    where.tags = {
+      some: {
+        tagId: { in: tagIdArray },
+      },
+    };
+  }
+
+  // 知识标签筛选
+  if (knowledgeTagIds) {
+    const knowledgeTagIdArray = knowledgeTagIds.split(',');
+    where.knowledgeTags = {
+      some: {
+        knowledgeTagId: { in: knowledgeTagIdArray },
+      },
+    };
   }
 
   const [questions, total] = await Promise.all([
@@ -36,6 +60,7 @@ export async function GET(request: NextRequest) {
       include: {
         createdBy: { select: { name: true } },
         tags: { include: { tag: true } },
+        knowledgeTags: { include: { knowledgeTag: true } },
         _count: { select: { reviews: true } },
       },
       orderBy: { updatedAt: 'desc' },
