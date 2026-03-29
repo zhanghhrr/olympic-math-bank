@@ -4,6 +4,14 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Plus, Search, Filter } from 'lucide-react';
+import { KnowledgeTagBadge } from '@/components/knowledge-tag-display';
+
+interface KnowledgeTag {
+  id: string;
+  name: string;
+  level: number;
+  parent?: any;
+}
 
 interface Question {
   id: string;
@@ -14,15 +22,16 @@ interface Question {
   status: string;
   createdBy: { name: string };
   tags: { tag: { name: string } }[];
+  knowledgeTags?: { knowledgeTag: KnowledgeTag }[];
   createdAt: string;
 }
 
+// 题目类型 - 限定为四类
 const typeLabels: Record<string, string> = {
-  SINGLE_CHOICE: '单选题',
-  MULTI_CHOICE: '多选题',
   FILL_BLANK: '填空题',
+  CHOICE: '选择题',
   SOLUTION: '解答题',
-  PROOF: '证明题',
+  CALCULATION: '计算题',
 };
 
 const gradeLabels: Record<string, string> = {
@@ -150,6 +159,7 @@ export default function QuestionsPage() {
           <thead className="bg-slate-50 border-b">
             <tr>
               <th className="px-4 py-3 text-left text-sm font-medium text-slate-600">题目内容</th>
+              <th className="px-4 py-3 text-left text-sm font-medium text-slate-600">知识标签</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-slate-600">题型</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-slate-600">年级</th>
               <th className="px-4 py-3 text-left text-sm font-medium text-slate-600">难度</th>
@@ -161,7 +171,7 @@ export default function QuestionsPage() {
           <tbody className="divide-y">
             {questions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                   暂无题目，点击"新建题目"添加
                 </td>
               </tr>
@@ -172,14 +182,19 @@ export default function QuestionsPage() {
                     <div className="max-w-md truncate" title={q.content}>
                       {q.content}
                     </div>
-                    {q.tags.length > 0 && (
-                      <div className="flex gap-1 mt-1">
-                        {q.tags.map((t) => (
-                          <span key={t.tag.name} className="text-xs px-2 py-0.5 bg-slate-100 rounded-full">
-                            {t.tag.name}
-                          </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {q.knowledgeTags && q.knowledgeTags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {q.knowledgeTags.slice(0, 2).map(({ knowledgeTag }) => (
+                          <KnowledgeTagBadge key={knowledgeTag.id} tag={knowledgeTag} />
                         ))}
+                        {q.knowledgeTags.length > 2 && (
+                          <span className="text-xs text-gray-400">+{q.knowledgeTags.length - 2}</span>
+                        )}
                       </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">未分类</span>
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm">{typeLabels[q.type] || q.type}</td>

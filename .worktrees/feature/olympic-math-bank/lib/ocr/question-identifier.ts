@@ -1,0 +1,958 @@
+/**
+ * 混合题目识别器
+ * 将 verify_general_lecture.py 中的 HybridQuestionIdentifier 转换为 TypeScript
+ * 用于智能识别和分割题目内容
+ */
+
+export interface IdentifiedBlock {
+  type: 'single_question' | 'list_container' | 'ignore' | 'unknown';
+  content: string;
+  answer?: string;
+  header?: string;
+  hasAnswer: boolean;
+  hasImage: boolean;
+}
+
+// 题目类型 - 限定为四类
+export type QuestionType = '填空题' | '选择题' | '解答题' | '计算题';
+
+export interface ParsedQuestion {
+  title?: string;
+  content: string;
+  answer?: string;
+  analysis?: string;
+  type?: QuestionType;
+  difficulty?: number;
+  hasImage?: boolean;
+}
+
+export type { ParsedQuestion as ParsedQuestionType };
+
+export class HybridQuestionIdentifier {
+  // 题目关键词
+  private questionKeywords = [
+    '例题', '练一练', '乘风破浪', '题目', '小试', '挑战',
+    '口算', '脱式计算', '解方程', '牛刀', '真题', '练习', '进门考',
+    '计算', '算一算', '解答题', '典型例题', '典型例', '例'
+  ];
+
+  // 答案关键词 - 扩展更多格式
+  private answerKeywords = [
+    '答案', '解析', '解答', '解：', '解:', '【答案】', '【解析】', '【标注】',
+    '答:', '答：', '解', '解析：', '解答：', '参考答案', '参考解析',
+    '【解答】', '【解】', '【参考答案】', '【参考解析】'
+  ];
+
+  // 忽略关键词
+  private ignoreKeywords = [
+    '学习目标', '厉兵秣马', '数学视野', '庖丁解牛', '故事', '知识卡片'
+  ];
+
+  // 序号匹配: "1.", "1、", "(1)", "①", "【例1】", "一、", "(一)" 等
+  private numberPattern = /^\s*(\d+[\.、]|[(（]\s*\d+\s*[)）]|[①-⑩]|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.、]|【.*?\d+.*?】|第\s*\d+\s*题|[一二三四五六七八九十]+[、\.]|[(（]\s*[一二三四五六七八九十]+\s*[)）])/;
+
+  // 列表分割匹配
+  private listPattern = /^\s*(\d+[\.、]|[(（]\s*\d+\s*[)）]|[一二三四五六七八九十]+[、\.]|[(（]\s*[一二三四五六七八九十]+\s*[)）]|[①-⑩]|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.、])\s*/;
+
+  // 图片匹配
+  private imagePattern = /!\[.*?\]\(.*?\)|<img.*?>/;
+
+  // 标题匹配 (#, ##, ###)
+  private headerPattern = /^(#{1,6})\s+(.*)/;
+
+  /**
+   * 判断是否是题目标题
+   */
+  isQuestionHeader(text: string): boolean {
+    // 包含题目关键词
+    for (const k of this.questionKeywords) {
+      if (text.includes(k)) return true;
+    }
+    // 或者以数字序号开头
+    if (this.numberPattern.test(text.trim())) return true;
+    // 或者包含明显的答案标识符
+    if (['【答案】', '【解析】', '【解答】'].some(marker => text.includes(marker))) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 判断是否是忽略的标题
+   */
+  isIgnoreHeader(text: string): boolean {
+    for (const k of this.ignoreKeywords) {
+      if (text.includes(k)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 判断是否包含答案关键词
+   */
+  hasAnswerKeyword(text: string): boolean {
+    for (const k of this.answerKeywords) {
+      if (text.includes(k)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 判断是否包含图片
+   */
+  hasImage(text: string): boolean {
+    return this.imagePattern.test(text);
+  }
+
+  /**
+   * 尝试分离单题块中的题目和答案
+   * 返回 [question, answer]
+   */
+  private splitQAInBlock(content: string): [string, string] {
+    const ansMarkers = ['【答案】', '答案：', '答案:', '解析：', '解析:', '【解析】'];
+    let splitPos = -1;
+
+    for (const marker of ansMarkers) {
+      const pos = content.indexOf(marker);
+      if (pos !== -1) {
+        if (splitPos === -1 || pos < splitPos) {
+          splitPos = pos;
+        }
+      }
+    }
+
+    if (splitPos !== -1) {
+      const qPart = content.substring(0, splitPos).trim();
+      const aPart = content.substring(splitPos).trim();
+      return [qPart, aPart];
+    }
+
+    return [content, ''];
+  }
+
+  /**
+   * 在答案部分中检测是否包含新的题目
+   * 处理【标注】后紧跟新题的情况
+   */
+  private splitQuestionsInAnswer(answerPart: string): Array<{content: string; answer?: string}> {
+    const questions: Array<{content: string; answer?: string}> = [];
+
+    // 按行分割
+    const lines = answerPart.split('\n');
+    let currentQuestion: string[] = [];
+    let currentAnswer: string[] = [];
+    let inAnswer = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      // 检测是否是新题目开始（以序号开头）
+      const isNewQuestion = this.listPattern.test(line) &&
+        !line.startsWith('【') &&
+        !line.startsWith('(') &&
+        !line.match(/^\d+[\.、]\s*原式/); // 排除 "(1) 原式" 这种答案格式
+
+      if (isNewQuestion && currentQuestion.length > 0) {
+        // 保存之前的题目
+        questions.push({
+          content: currentQuestion.join('\n').trim(),
+          answer: currentAnswer.join('\n').trim() || undefined
+        });
+        currentQuestion = [line];
+        currentAnswer = [];
+        inAnswer = false;
+      } else if (line.startsWith('【答案】') || (line.match(/^\(\d+\)/) && inAnswer === false && currentQuestion.length > 0)) {
+        // 进入答案部分
+        inAnswer = true;
+        currentAnswer.push(line);
+      } else if (inAnswer) {
+        currentAnswer.push(line);
+      } else {
+        currentQuestion.push(line);
+      }
+    }
+
+    // 保存最后一个题目
+    if (currentQuestion.length > 0) {
+      questions.push({
+        content: currentQuestion.join('\n').trim(),
+        answer: currentAnswer.join('\n').trim() || undefined
+      });
+    }
+
+    return questions;
+  }
+
+  /**
+   * 检测内容是否像是一个题目列表
+   */
+  private isLikelyQuestionList(content: string, blockType: string = 'unknown'): boolean {
+    const lines = content.split('\n');
+    let numStartCount = 0;
+    let ansMarkerCount = 0;
+    const stylesFound = new Set<string>();
+
+    for (const line of lines) {
+      const lineStripped = line.trim();
+      const match = this.listPattern.exec(lineStripped);
+      if (match) {
+        numStartCount++;
+        stylesFound.add(this.getNumberingType(match[1]));
+      }
+      if (this.hasAnswerKeyword(line)) {
+        ansMarkerCount++;
+      }
+    }
+
+    // 1. 没有序号开头，肯定不是列表
+    if (numStartCount === 0) return false;
+
+    // 2. 如果当前块已经被标识为"典型例题"，应极力避免按子题拆分
+    if (blockType === 'single_question') {
+      const majorStyles = new Set(['CHINESE_NUM', 'ARABIC_DOT']);
+      let majorCount = 0;
+      for (const line of lines) {
+        const m = this.listPattern.exec(line.trim());
+        if (m && majorStyles.has(this.getNumberingType(m[1]))) {
+          majorCount++;
+        }
+      }
+      if (majorCount >= 3) return true;
+      return false;
+    }
+
+    // 3. 如果包含至少2个明显的答案标记，认为是列表
+    if (ansMarkerCount >= 2) {
+      if (stylesFound.size === 1 && stylesFound.has('SMALL_NUM') && ansMarkerCount <= 2) {
+        return false;
+      }
+      if (stylesFound.size === 1 && stylesFound.has('SMALL_NUM') && ansMarkerCount <= 3) {
+        return false;
+      }
+      return true;
+    }
+
+    // 4. 如果只有一个或零个答案标记
+    if (ansMarkerCount <= 1) {
+      if (stylesFound.size === 1 && stylesFound.has('SMALL_NUM')) {
+        return false;
+      }
+      const majorStyles = new Set(['CHINESE_NUM', 'ARABIC_DOT']);
+      let majorCount = 0;
+      for (const line of lines) {
+        const m = this.listPattern.exec(line.trim());
+        if (m && majorStyles.has(this.getNumberingType(m[1]))) {
+          majorCount++;
+        }
+      }
+      if (majorCount >= 2) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 主分割方法
+   * 混合分割策略:
+   * 1. 尝试使用 Markdown 标题 (#) 进行结构化分割
+   * 2. 如果结构化分割失败，回退到旧的关键词分割
+   */
+  splitContent(content: string): IdentifiedBlock[] {
+    // 预处理：合并题号单独一行的情况（必须在最前面处理）
+    const preprocessedContent = this.mergeQuestionNumbers(content);
+
+    // 尝试标题分割
+    const structureBlocks = this.splitByHeaders(preprocessedContent);
+
+    // 统计有效块
+    const finalBlocks: IdentifiedBlock[] = [];
+
+    for (const block of structureBlocks) {
+      // 关键修复：只要内容看起来像题目列表，强制转为 list_container
+      if (this.isLikelyQuestionList(block.content, block.type)) {
+        block.type = 'list_container';
+      }
+
+      if (block.type === 'ignore') continue;
+      else if (block.type === 'list_container') {
+        // 需要内部再切分
+        const subBlocks = this.splitListBlock(block.content);
+        finalBlocks.push(...subBlocks);
+      } else if (block.type === 'unknown') {
+        // 对 unknown 块尝试用关键词分割
+        if (this.isLikelyQuestionList(block.content)) {
+          const subBlocks = this.splitListBlock(block.content);
+          finalBlocks.push(...subBlocks);
+        } else {
+          const [q, a] = this.splitQAInBlock(block.content);
+          if (a || this.hasAnswerKeyword(block.content)) {
+            block.content = q;
+            block.answer = a;
+            block.hasImage = this.hasImage(q) || this.hasImage(a);
+            block.hasAnswer = true;
+            finalBlocks.push(block);
+          }
+        }
+      } else {
+        // 单题块
+        const [q, a] = this.splitQAInBlock(block.content);
+        block.content = q;
+        block.answer = a;
+        block.hasImage = this.hasImage(q) || this.hasImage(a);
+        block.hasAnswer = !!(a) || this.hasAnswerKeyword(block.content);
+
+        // 关键过滤：如果没有答案，但内容看起来像题目，保留它
+        // 刷题课中有些题目可能没有标准答案格式，但仍应保留
+        if (!block.hasAnswer) {
+          // 检查是否包含题号或明显的题目特征
+          const hasQuestionNumber = /^\s*\d+[\.、]/.test(block.content);
+          const hasQuestionKeyword = /计算|求|问|多少|几|是/.test(block.content);
+          const isLongEnough = block.content.length > 20;
+
+          if (hasQuestionNumber && hasQuestionKeyword && isLongEnough) {
+            // 保留这个题目，即使没有明确答案
+            block.hasAnswer = true;
+          } else {
+            continue;
+          }
+        }
+
+        // 检查答案部分是否包含新的题目（【标注】后紧跟新题的情况）
+        if (a && a.includes('【标注】')) {
+          const subQuestions = this.splitQuestionsInAnswer(a);
+          if (subQuestions.length > 1) {
+            // 第一个是当前题目的答案（不含标注后的内容）
+            const firstAnsEnd = a.indexOf('【标注】');
+            block.answer = a.substring(0, firstAnsEnd).trim();
+            finalBlocks.push(block);
+
+            // 后续的是新题目
+            for (let i = 1; i < subQuestions.length; i++) {
+              const sq = subQuestions[i];
+              finalBlocks.push({
+                type: 'single_question',
+                content: sq.content,
+                answer: sq.answer,
+                hasAnswer: !!(sq.answer),
+                hasImage: this.hasImage(sq.content) || this.hasImage(sq.answer || '')
+              });
+            }
+            continue;
+          }
+        }
+
+        finalBlocks.push(block);
+      }
+    }
+
+    // 如果最终提取到的块太少，尝试回退
+    if (finalBlocks.length === 0 || finalBlocks.length < 2) {
+      console.log('⚠️ 结构化分割产出块太少，回退到关键词分割模式...');
+      return this.splitByKeywordsLegacy(content);
+    }
+
+    return finalBlocks;
+  }
+
+  /**
+   * 判断是否是章节大标题（如 "(三) 大数计算"）
+   */
+  private isSectionHeader(text: string): boolean {
+    // 匹配模式：(三)、（三）、三、 后面跟着2-8个汉字的标题
+    const sectionPattern = /^[(（]?[一二三四五六七八九十]+[)）]?、?\s*[\u4e00-\u9fa5]{2,8}$/;
+    return sectionPattern.test(text.trim());
+  }
+
+  /**
+   * 按 Markdown 标题分割
+   */
+  private splitByHeaders(content: string): IdentifiedBlock[] {
+    const lines = content.split('\n');
+    const blocks: IdentifiedBlock[] = [];
+    let currentBlock: {
+      type: string;
+      content: string[];
+      header: string;
+    } = { type: 'unknown', content: [], header: '' };
+
+    for (const line of lines) {
+      const lineStripped = line.trim();
+      const headerMatch = this.headerPattern.exec(lineStripped);
+
+      if (headerMatch) {
+        const headerText = headerMatch[2];
+
+        // 如果标题是章节大标题（如 "(三) 大数计算"），直接标记为 ignore
+        if (this.isSectionHeader(headerText)) {
+          // 保存旧块
+          if (currentBlock.content.length > 0) {
+            const contentStr = currentBlock.content.join('\n').trim();
+            if (contentStr) {
+              blocks.push({
+                type: currentBlock.type as any,
+                content: contentStr,
+                header: currentBlock.header,
+                hasAnswer: false,
+                hasImage: false
+              });
+            }
+          }
+          // 开始新的 ignore 块
+          currentBlock = {
+            type: 'ignore',
+            content: [line],
+            header: headerText
+          };
+          continue;
+        }
+
+        // 如果标题包含答案关键词，且当前正在处理题目，则认为该标题是题目的一部分
+        if (this.hasAnswerKeyword(headerText) &&
+            (currentBlock.type === 'single_question' || currentBlock.type === 'list_container')) {
+          currentBlock.content.push(line);
+          continue;
+        }
+
+        // 保存旧块
+        if (currentBlock.content.length > 0) {
+          const contentStr = currentBlock.content.join('\n').trim();
+          if (contentStr) {
+            const isPureHeader = currentBlock.content.length === 1;
+            const hasQ = this.isQuestionHeader(contentStr);
+            const hasA = this.hasAnswerKeyword(contentStr);
+
+            if (isPureHeader && !(hasQ || hasA)) {
+              if (currentBlock.type === 'single_question') {
+                currentBlock.type = 'ignore';
+              }
+            }
+
+            blocks.push({
+              type: currentBlock.type as any,
+              content: contentStr,
+              header: currentBlock.header,
+              hasAnswer: false,
+              hasImage: false
+            });
+          }
+        }
+
+        // 开始新块
+        let blockType = 'unknown';
+        if (this.isQuestionHeader(headerText)) {
+          if (['练习', '真题', '测试', '进门考', '挑战'].some(k => headerText.includes(k))) {
+            blockType = 'list_container';
+          } else {
+            blockType = 'single_question';
+          }
+        } else if (this.isIgnoreHeader(headerText)) {
+          if (this.hasAnswerKeyword(headerText)) {
+            blockType = 'single_question';
+          } else {
+            blockType = 'ignore';
+          }
+        } else {
+          if (this.hasAnswerKeyword(headerText)) {
+            blockType = 'single_question';
+          } else {
+            blockType = 'ignore';
+          }
+        }
+
+        currentBlock = {
+          type: blockType,
+          content: [line],
+          header: headerText
+        };
+      } else {
+        currentBlock.content.push(line);
+      }
+    }
+
+    // 保存最后一个块
+    if (currentBlock.content.length > 0) {
+      const contentStr = currentBlock.content.join('\n').trim();
+      if (contentStr) {
+        blocks.push({
+          type: currentBlock.type as any,
+          content: contentStr,
+          header: currentBlock.header,
+          hasAnswer: false,
+          hasImage: false
+        });
+      }
+    }
+
+    // 统计有效块
+    const validCount = blocks.filter(b => b.type !== 'unknown').length;
+    if (validCount === 0) return [];
+
+    return blocks;
+  }
+
+  /**
+   * 判断序号类型
+   */
+  private getNumberingType(text: string): string {
+    if (!text) return 'OTHER';
+
+    // Chinese numerals
+    if (/^[一二三四五六七八九十百]+[、\.]$/.test(text)) return 'CHINESE_NUM';
+    if (/^[（(]\s*[一二三四五六七八九十百]+\s*[)）]$/.test(text)) return 'CHINESE_PAREN';
+
+    // Arabic numerals
+    if (/^\d+[.、]$/.test(text)) return 'ARABIC_DOT';
+
+    // Small nums
+    if (/^[（(]\s*\d+\s*[)）]$/.test(text) || /^[①-⑩]$/.test(text) || /^[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.、]$/.test(text)) {
+      return 'SMALL_NUM';
+    }
+
+    return 'OTHER';
+  }
+
+  /**
+   * 预处理：合并题号单独一行的情况
+   * 处理模式：
+   *   6.
+   *   右下图是聪聪...
+   * 合并为：
+   *   6. 右下图是聪聪...
+   */
+  private mergeQuestionNumbers(content: string): string {
+    // 先统一换行符
+    let normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // 使用更简单的正则替换方法
+    // 匹配模式：行首的数字+点，后面紧跟换行符，再跟非空行
+    // 使用多行模式(m)和点号匹配所有字符(s)
+    normalized = normalized.replace(
+      /^(\s*\d+[\.．、])\s*\n(?!\s*\d+[\.．、]|\s*【|\s*!\[|\s*$)(.+)$/gm,
+      '$1 $2'
+    );
+
+    return normalized;
+  }
+
+  /**
+   * 对列表容器块进行二次分割
+   * 改进：更好地处理连续题号，确保不遗漏题目
+   * 关键修复：处理题号单独一行的情况（如 "6.\n" + "题目内容"）
+   */
+  private splitListBlock(content: string): IdentifiedBlock[] {
+    // 预处理：合并题号单独一行的情况
+    // 模式：行只包含题号（如 "6."、"8."），下一行是实际内容
+    const preprocessedContent = this.mergeQuestionNumbers(content);
+    const lines = preprocessedContent.split('\n');
+
+    // Pass 1: Determine types present and collect all separators with their line numbers
+    const typesFound = new Set<string>();
+    const separatorLines: Array<{ lineIndex: number; style: string; number: number }> = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineStripped = lines[i].trim();
+      const match = this.listPattern.exec(lineStripped);
+      if (match) {
+        const text = match[1];
+        const style = this.getNumberingType(text);
+        if (style !== 'OTHER') {
+          typesFound.add(style);
+          // 尝试提取序号数字
+          const numMatch = text.match(/\d+/);
+          const num = numMatch ? parseInt(numMatch[0]) : 0;
+          separatorLines.push({ lineIndex: i, style, number: num });
+        }
+      }
+    }
+
+    // Determine target style based on priority
+    let targetStyle: string | null = null;
+    if (typesFound.has('ARABIC_DOT')) targetStyle = 'ARABIC_DOT';
+    else if (typesFound.has('CHINESE_NUM')) targetStyle = 'CHINESE_NUM';
+    else if (typesFound.has('CHINESE_PAREN')) targetStyle = 'CHINESE_PAREN';
+    else if (typesFound.has('SMALL_NUM')) targetStyle = 'SMALL_NUM';
+
+    // 如果没有找到目标样式，但有分隔符，使用第一个分隔符的样式
+    if (!targetStyle && separatorLines.length > 0) {
+      targetStyle = separatorLines[0].style;
+    }
+
+    const subBlocks: IdentifiedBlock[] = [];
+    const currentSub: string[] = [];
+    let introText = '';
+    let isFirstChunk = true;
+    let lastNumber = 0;
+
+    const flushBlock = (linesList: string[], isFirst: boolean = false) => {
+      if (linesList.length === 0) return;
+      let text = linesList.join('\n').trim();
+      if (!text) return;
+
+      // 清洗内容，移除OCR残留
+      text = this.cleanQuestionContent(text);
+      if (!text) return;
+
+      // 如果是第一块，且没有答案标记，通常是列表的引导词
+      if (isFirst) {
+        const [q, a] = this.splitQAInBlock(text);
+        if (!a && !this.hasAnswerKeyword(text)) {
+          introText = text;
+          return;
+        }
+      }
+
+      // 附加引导词
+      if (introText) {
+        text = introText + '\n' + text;
+        introText = '';
+      }
+
+      const [q, a] = this.splitQAInBlock(text);
+      const hasAns = !!(a) || this.hasAnswerKeyword(text);
+
+      // 检查是否看起来像题目（有题号或题目特征）
+      const hasQuestionNumber = /^\s*\d+[\.、]/.test(text);
+      const hasQuestionKeyword = /计算|求|问|多少|几|是|个|填|选择/.test(text);
+      const looksLikeQuestion = hasQuestionNumber || (hasQuestionKeyword && text.length > 15);
+
+      // 保留有答案的题目，或者看起来像题目的内容
+      if (hasAns || looksLikeQuestion) {
+        subBlocks.push({
+          content: q,
+          answer: a,
+          hasAnswer: hasAns,
+          hasImage: this.hasImage(text),
+          type: 'single_question'
+        });
+      }
+    };
+
+    // 改进的分割逻辑：使用记录的separator位置进行精确分割
+    let currentSeparatorIndex = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineStripped = lines[i].trim();
+      const match = this.listPattern.exec(lineStripped);
+      let isSeparator = false;
+
+      if (match) {
+        const text = match[1];
+        const style = this.getNumberingType(text);
+
+        // 检查是否是目标样式的分隔符
+        if (targetStyle && style === targetStyle) {
+          isSeparator = true;
+          const numMatch = text.match(/\d+/);
+          const currentNumber = numMatch ? parseInt(numMatch[0]) : 0;
+
+          // 检测题号是否连续，如果不连续可能是遗漏了题目
+          if (lastNumber > 0 && currentNumber > lastNumber + 1 && currentNumber <= lastNumber + 3) {
+            console.log(`  [Warning] 题号不连续: ${lastNumber} -> ${currentNumber}，可能有遗漏`);
+          }
+          lastNumber = currentNumber;
+        }
+      }
+
+      if (isSeparator) {
+        flushBlock(currentSub, isFirstChunk);
+        isFirstChunk = false;
+        currentSub.length = 0;
+        currentSub.push(lines[i]);
+        currentSeparatorIndex++;
+      } else {
+        currentSub.push(lines[i]);
+      }
+    }
+
+    flushBlock(currentSub, isFirstChunk);
+
+    // 后处理：检查是否有明显的遗漏（题号跳跃）
+    this.checkForMissingQuestions(subBlocks);
+
+    return subBlocks;
+  }
+
+  /**
+   * 检查是否有遗漏的题目（通过分析题号连续性）
+   */
+  private checkForMissingQuestions(blocks: IdentifiedBlock[]): void {
+    const numbers: number[] = [];
+
+    for (const block of blocks) {
+      const match = block.content.match(/^(\d+)[\.、]/);
+      if (match) {
+        numbers.push(parseInt(match[1]));
+      }
+    }
+
+    if (numbers.length >= 2) {
+      for (let i = 1; i < numbers.length; i++) {
+        if (numbers[i] > numbers[i - 1] + 1) {
+          console.log(`  [Warning] 检测到题号跳跃: ${numbers[i - 1]} -> ${numbers[i]}，可能有遗漏题目`);
+        }
+      }
+    }
+  }
+
+  /**
+   * 基于关键词和逻辑分割内容为题目块（旧逻辑）
+   */
+  private splitByKeywordsLegacy(content: string): IdentifiedBlock[] {
+    const lines = content.split('\n');
+    const blocks: IdentifiedBlock[] = [];
+    const currentBlockLines: string[] = [];
+    let currentHasAnswer = false;
+
+    const flushLegacyBlock = (linesList: string[], hasAns: boolean) => {
+      if (linesList.length === 0) return;
+      const text = linesList.join('\n').trim();
+      if (!text) return;
+
+      const [q, a] = this.splitQAInBlock(text);
+      const finalHasAns = !!(a) || hasAns;
+      if (finalHasAns) {
+        blocks.push({
+          content: q,
+          answer: a,
+          hasAnswer: finalHasAns,
+          hasImage: this.hasImage(text),
+          type: 'single_question'
+        });
+      }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const lineStripped = line.trim();
+      if (!lineStripped) continue;
+
+      const isQKeyword = this.isQuestionHeader(lineStripped);
+      const isNumStart = this.numberPattern.test(lineStripped);
+
+      let startNew = false;
+
+      if (isQKeyword) {
+        startNew = true;
+      } else if (isNumStart) {
+        if (currentHasAnswer) {
+          startNew = true;
+        } else if (currentBlockLines.length === 0) {
+          startNew = true;
+        }
+      }
+
+      if (startNew && currentBlockLines.length > 0) {
+        flushLegacyBlock(currentBlockLines, currentHasAnswer);
+        currentBlockLines.length = 0;
+        currentHasAnswer = false;
+      }
+
+      currentBlockLines.push(line);
+
+      if (this.hasAnswerKeyword(lineStripped)) {
+        currentHasAnswer = true;
+      }
+    }
+
+    flushLegacyBlock(currentBlockLines, currentHasAnswer);
+
+    return blocks;
+  }
+
+  /**
+   * 检测题目类型 - 限定为四类：填空题、选择题、解答题、计算题
+   */
+  detectQuestionType(content: string): '填空题' | '选择题' | '解答题' | '计算题' {
+    // 1. 检测计算题（优先级最高）
+    // 特征：包含计算、口算、脱式、竖式等关键词，或纯算式
+    if (/计算|口算|脱式|竖式|简便计算|递等式|直接写得数/.test(content)) {
+      // 如果同时有横线填空，可能是填空形式的计算题
+      if (/[_\(\)（）]+/.test(content) && !/=/.test(content)) {
+        return '填空题';
+      }
+      return '计算题';
+    }
+
+    // 2. 检测选择题
+    // 特征：包含选项A/B/C/D，或有"选择"字样
+    if (/[A-D][\.、\s]/.test(content) || /选项|选择/.test(content)) {
+      return '选择题';
+    }
+
+    // 3. 检测填空题
+    // 特征：包含横线、括号等待填位置
+    if (/[_\(\)（）]+|____|□/.test(content) || /填空/.test(content)) {
+      return '填空题';
+    }
+
+    // 4. 默认为解答题
+    // 应用题、几何证明、文字叙述题等都归为解答题
+    return '解答题';
+  }
+
+  /**
+   * 章节标题模式 - 用于过滤大标题混入题目的情况
+   * 匹配：(三)、（三）、三、 后面跟着2-8个汉字，可选以"计算/应用/几何"等结尾
+   */
+  private sectionHeaderPattern = /^[(（]?[一二三四五六七八九十]+[)）]?、?\s*[\u4e00-\u9fa5]{2,8}(?:计算|应用|几何|计数|数论|杂题|专题|部分)?/;
+
+  /**
+   * 清洗题目内容，移除 OCR 残留和异常字符
+   * 处理策略：
+   * 1. 移除行首的重复数字残留（如 "345345345345 2." -> "2."）
+   * 2. 移除孤立的数字串（连续6位以上数字，不在公式中）
+   * 3. 过滤章节大标题（如 "(三) 大数计算"）
+   * 4. 清理多余的空行
+   * 5. 修复重复识别的数字串
+   */
+  private cleanQuestionContent(content: string): string {
+    let cleaned = content;
+
+    // 策略1: 移除行首的重复数字残留（数字串后跟序号的情况）
+    // 匹配行首的连续数字（6位以上），后面跟着序号
+    cleaned = cleaned.replace(/^(\d{6,})\s+(\d+[\.、]|[(（]\s*\d+\s*[)）])/gm, '$2');
+
+    // 策略1.5: 修复重复数字模式（如 "345345345345" 这种重复3-4次的数字）
+    // 检测重复3次以上的短数字串（3-5位数字重复）
+    cleaned = cleaned.replace(/(\d{3,5})\1{2,}/g, '');
+
+    // 策略1.6: 移除行内孤立的超长重复数字串
+    cleaned = cleaned.replace(/\b\d{9,}\b/g, '');
+
+    // 策略2: 移除孤立的超长数字串（不在 LaTeX 公式中）
+    // 只处理不在 $...$ 或 \(...\) 中的纯数字串（8位以上）
+    const lines = cleaned.split('\n');
+    const processedLines = lines.map(line => {
+      // 如果行包含 LaTeX 公式，谨慎处理
+      if (line.includes('$') || line.includes('\\(') || line.includes('\\[')) {
+        return line;
+      }
+      // 移除行首或行尾的孤立长数字串
+      return line.replace(/^\d{6,}\s+|\s+\d{6,}$/g, '');
+    });
+    cleaned = processedLines.join('\n');
+
+    // 策略3: 过滤章节大标题
+    // 处理两种情况：
+    // 1. 章节标题单独一行
+    // 2. 章节标题和题目在同一行（如 "## (三) 大数计算 16. 计算：..."）
+
+    // 首先处理章节标题和题目在同一行的情况
+    // 模式：Markdown标题标记 + 章节标题 + 题号
+    const combinedPattern = /^(#{1,6}\s*)?[(（]?[一二三四五六七八九十]+[)）]?、?\s*[\u4e00-\u9fa5]{2,8}(?:计算|应用|几何|计数|数论|杂题|专题|部分)?\s*(\d+[\.、])/gm;
+    cleaned = cleaned.replace(combinedPattern, '$1$2');
+
+    // 然后处理单独的章节标题行
+    const lines2 = cleaned.split('\n');
+    const filteredLines: string[] = [];
+    let skipSectionHeader = true;
+
+    for (const line of lines2) {
+      const trimmedLine = line.trim();
+
+      // 检测是否是纯章节标题行（不包含题号）
+      const isPureSectionHeader = this.sectionHeaderPattern.test(trimmedLine) &&
+                                   !this.numberPattern.test(trimmedLine) &&
+                                   trimmedLine.length < 20;
+
+      // 如果是开头的章节标题，跳过
+      if (skipSectionHeader && isPureSectionHeader) {
+        continue;
+      }
+
+      // 一旦遇到有效内容（题号或题目关键词），停止跳过
+      if (skipSectionHeader && (this.numberPattern.test(trimmedLine) || this.isQuestionHeader(trimmedLine))) {
+        skipSectionHeader = false;
+      }
+
+      // 过滤掉单独的章节标题行（在中间出现的情况）
+      if (isPureSectionHeader) {
+        continue;
+      }
+
+      filteredLines.push(line);
+    }
+    cleaned = filteredLines.join('\n');
+
+    // 策略4: 清理多余空行
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+    // 策略5: 清理行首行尾的空格
+    cleaned = cleaned.split('\n').map(line => line.trim()).join('\n');
+
+    return cleaned.trim();
+  }
+
+  /**
+   * 将识别块转换为标准题目格式
+   */
+  convertToQuestions(blocks: IdentifiedBlock[]): ParsedQuestion[] {
+    const questions: ParsedQuestion[] = [];
+    let questionNumber = 1;
+
+    for (const block of blocks) {
+      if (!block.content || block.content.length < 5) continue;
+
+      // 清洗内容，移除 OCR 残留
+      const cleanedContent = this.cleanQuestionContent(block.content);
+      if (cleanedContent.length < 5) continue;
+
+      // 提取题目标题
+      let title: string | undefined;
+
+      // 尝试匹配题号+标题的格式
+      const titleMatch = cleanedContent.match(/^(?:\d+[\.、]|典型例题|牛刀小试)\s*(.+?)(?:\n|$)/);
+      if (titleMatch) {
+        title = titleMatch[1].trim();
+      }
+
+      // 从答案中提取解析
+      let analysis: string | undefined;
+      let answer = block.answer ? this.cleanQuestionContent(block.answer) : undefined;
+
+      if (answer) {
+        const analysisMatch = answer.match(/【解析】([\s\S]*?)(?=\n\n|$)/);
+        if (analysisMatch) {
+          analysis = analysisMatch[1].trim();
+          // 从答案中移除解析部分
+          answer = answer.replace(/【解析】[\s\S]*?(?=\n\n|$)/, '').trim();
+        }
+        // 移除答案标记
+        answer = answer.replace(/^【答案】/, '').trim();
+      }
+
+      // 确保内容以正确的题号开头
+      let finalContent = cleanedContent;
+      const hasNumberPrefix = /^\d+[\.、]/.test(cleanedContent);
+      if (!hasNumberPrefix && title) {
+        // 如果没有题号但有标题，尝试添加题号
+        finalContent = `${questionNumber}. ${cleanedContent}`;
+      }
+
+      // 检测题目类型
+      const questionType = this.detectQuestionType(finalContent);
+
+      questions.push({
+        title,
+        content: finalContent,
+        answer,
+        analysis,
+        type: questionType,
+        hasImage: block.hasImage
+      });
+
+      questionNumber++;
+    }
+
+    // 最后检查：如果题目数量明显偏少，输出警告
+    if (blocks.length > 0 && questions.length < blocks.length * 0.5) {
+      console.log(`  [Warning] 题目转换率较低: ${questions.length}/${blocks.length}，可能有内容被过滤`);
+    }
+
+    return questions;
+  }
+}
+
+// 导出单例
+export const questionIdentifier = new HybridQuestionIdentifier();

@@ -14,13 +14,12 @@ enum UserRole {
   EDITOR
 }
 
-// 题目类型
+// 题目类型 - 限定为四类
 enum QuestionType {
-  SINGLE_CHOICE    // 单选题
-  MULTI_CHOICE     // 多选题
   FILL_BLANK       // 填空题
+  CHOICE           // 选择题（包含单选和多选）
   SOLUTION         // 解答题
-  PROOF            // 证明题
+  CALCULATION      // 计算题
 }
 
 // 题目状态
@@ -45,11 +44,7 @@ enum Grade {
 enum TagType {
   GRADE       // 年级
   DIFFICULTY  // 难度
-  MODULE      // 一级模块
-  TOPIC       // 二级主题
-  SUBTOPIC    // 三级子主题
-  KNOWLEDGE   // 四级知识点
-  SKILL       // 五级技能点
+  KNOWLEDGE   // 知识点（四级）
   COMPETITION // 竞赛类型
 }
 
@@ -149,51 +144,20 @@ model QuestionImage {
   @@map("question_images")
 }
 
-// 五级知识树标签表
-model KnowledgeTag {
-  id          String    @id @default(uuid())
-  name        String    // 标签名称
-  type        TagType   // 标签类型：MODULE, TOPIC, SUBTOPIC, KNOWLEDGE, SKILL
-  level       Int       // 层级：1-5
-  parentId    String?   // 父标签ID
-  parent      KnowledgeTag?  @relation("KnowledgeHierarchy", fields: [parentId], references: [id])
-  children    KnowledgeTag[] @relation("KnowledgeHierarchy")
-  fullPath    String    // 完整路径，如：计算模块/整数/整数加减/整数加法运算/加法横式
-  description String?   // 描述
-  order       Int       @default(0)  // 排序
-
-  // 关联
-  questions   QuestionKnowledgeTag[]
-
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  @@unique([name, type, parentId])
-  @@map("knowledge_tags")
-}
-
-// 题目与五级知识标签关联表
-model QuestionKnowledgeTag {
-  questionId      String
-  question        Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  knowledgeTagId  String
-  knowledgeTag    KnowledgeTag  @relation(fields: [knowledgeTagId], references: [id], onDelete: Cascade)
-
-  @@id([questionId, knowledgeTagId])
-  @@map("question_knowledge_tags")
-}
-
-// 传统标签表（保留用于年级、难度、竞赛类型等）
+// 标签表
 model Tag {
   id          String    @id @default(uuid())
   name        String    @unique
   type        TagType
+  parentId    String?
+  parent      Tag?      @relation("TagHierarchy", fields: [parentId], references: [id])
+  children    Tag[]     @relation("TagHierarchy")
   description String?
   order       Int       @default(0)
-
+  
   // 关联
   questions   QuestionTag[]
-
+  
   createdAt   DateTime  @default(now())
 
   @@map("tags")
@@ -262,4 +226,48 @@ model ImportJobItem {
   createdAt       DateTime        @default(now())
 
   @@map("import_job_items")
+}
+
+// 五级知识标签表
+model KnowledgeTag {
+  id              String          @id @default(uuid())
+  level           Int             // 1-5 级
+  name            String          // 标签名称
+  code            String          @unique  // 唯一编码，如 "计算模块-整数-整数加减-整数加法运算-加法横式"
+  
+  // 五级层级关系
+  module          String          // 一级：模块（如：计算模块、几何模块）
+  topic           String?         // 二级：专题（如：整数、小数、分数）
+  subtopic        String?         // 三级：子专题（如：整数加减、整数乘除）
+  knowledge       String?         // 四级：知识点（如：整数加法运算）
+  skill           String?         // 五级：技能（如：加法横式、加法竖式）
+  
+  // 父子关系（可选，用于快速查询）
+  parentId        String?
+  parent          KnowledgeTag?   @relation("KnowledgeHierarchy", fields: [parentId], references: [id])
+  children        KnowledgeTag[]  @relation("KnowledgeHierarchy")
+  
+  // 排序
+  order           Int             @default(0)
+  
+  // 关联
+  questions       QuestionKnowledgeTag[]
+  
+  createdAt       DateTime        @default(now())
+  
+  @@index([module])
+  @@index([level])
+  @@index([code])
+  @@map("knowledge_tags")
+}
+
+// 题目与知识标签关联表
+model QuestionKnowledgeTag {
+  questionId      String
+  question        Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  knowledgeTagId  String
+  knowledgeTag    KnowledgeTag    @relation(fields: [knowledgeTagId], references: [id], onDelete: Cascade)
+  
+  @@id([questionId, knowledgeTagId])
+  @@map("question_knowledge_tags")
 }

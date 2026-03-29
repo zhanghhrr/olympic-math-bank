@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { content, answer, solution, type, options, grade, difficulty, source, year, competition, tagIds } = body;
+  const { content, answer, solution, type, options, grade, difficulty, source, year, competition, tagIds, knowledgeTagIds } = body;
 
   const question = await prisma.question.create({
     data: {
@@ -104,8 +104,12 @@ export async function POST(request: NextRequest) {
       competition,
       createdById: (session.user as any).id as string,
       tags: tagIds ? { create: tagIds.map((id: string) => ({ tagId: id })) } : undefined,
+      knowledgeTags: knowledgeTagIds ? { create: knowledgeTagIds.map((id: string) => ({ knowledgeTagId: id })) } : undefined,
     },
-    include: { tags: { include: { tag: true } } },
+    include: { 
+      tags: { include: { tag: true } },
+      knowledgeTags: { include: { knowledgeTag: true } },
+    },
   });
 
   return NextResponse.json(question, { status: 201 });
