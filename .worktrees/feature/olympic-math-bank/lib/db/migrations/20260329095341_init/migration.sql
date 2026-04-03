@@ -126,6 +126,33 @@ CREATE TABLE "import_job_items" (
     CONSTRAINT "import_job_items_questionId_fkey" FOREIGN KEY ("questionId") REFERENCES "questions" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
+-- CreateTable
+CREATE TABLE "knowledge_tags" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "level" INTEGER NOT NULL,
+    "name" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "module" TEXT NOT NULL,
+    "topic" TEXT,
+    "subtopic" TEXT,
+    "knowledge" TEXT,
+    "skill" TEXT,
+    "parentId" TEXT,
+    "order" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "knowledge_tags_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "knowledge_tags" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "question_knowledge_tags" (
+    "questionId" TEXT NOT NULL,
+    "knowledgeTagId" TEXT NOT NULL,
+
+    PRIMARY KEY ("questionId", "knowledgeTagId"),
+    CONSTRAINT "question_knowledge_tags_questionId_fkey" FOREIGN KEY ("questionId") REFERENCES "questions" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "question_knowledge_tags_knowledgeTagId_fkey" FOREIGN KEY ("knowledgeTagId") REFERENCES "knowledge_tags" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
 
@@ -137,3 +164,15 @@ CREATE UNIQUE INDEX "question_versions_questionId_version_key" ON "question_vers
 
 -- CreateIndex
 CREATE UNIQUE INDEX "tags_name_key" ON "tags"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "knowledge_tags_code_key" ON "knowledge_tags"("code");
+
+-- CreateIndex
+CREATE INDEX "knowledge_tags_module_idx" ON "knowledge_tags"("module");
+
+-- CreateIndex
+CREATE INDEX "knowledge_tags_level_idx" ON "knowledge_tags"("level");
+
+-- CreateIndex
+CREATE INDEX "knowledge_tags_code_idx" ON "knowledge_tags"("code");

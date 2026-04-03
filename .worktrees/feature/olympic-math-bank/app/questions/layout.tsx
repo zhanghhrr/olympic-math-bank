@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { authOptions } from '@/lib/auth';
 import { Sidebar } from '@/components/layout/sidebar';
 
-export default async function DashboardLayout({
+export default async function QuestionsLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -17,8 +17,8 @@ export default async function DashboardLayout({
   return (
     <div className="min-h-screen bg-slate-50">
       <Sidebar user={session.user} />
-      <div className="ml-64 h-screen overflow-hidden">
-        <main className="h-full">{children}</main>
+      <div className="ml-64">
+        <main className="p-6">{children}</main>
       </div>
     </div>
   );

@@ -3,6 +3,15 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
 
+/**
+ * 去除题干开头的题号
+ */
+function stripQuestionNumber(content: string): string {
+  if (!content) return content;
+  const pattern = /^\s*(\d+[\.、．]|第\s*\d+\s*题|[一二三四五六七八九十]+[、，,]|[\(（]\s*\d+\s*[\)）]|[\[【]?\d+[\]】]?|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[ⅰⅱⅲⅳⅴ]+[.、])\s*/;
+  return content.replace(pattern, '');
+}
+
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -60,7 +69,27 @@ export async function GET(request: NextRequest) {
       include: {
         createdBy: { select: { name: true } },
         tags: { include: { tag: true } },
-        knowledgeTags: { include: { knowledgeTag: true } },
+        knowledgeTags: {
+          include: {
+            knowledgeTag: {
+              include: {
+                parent: {
+                  include: {
+                    parent: {
+                      include: {
+                        parent: {
+                          include: {
+                            parent: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
         _count: { select: { reviews: true } },
       },
       orderBy: { updatedAt: 'desc' },
@@ -92,7 +121,7 @@ export async function POST(request: NextRequest) {
 
   const question = await prisma.question.create({
     data: {
-      content,
+      content: stripQuestionNumber(content),
       answer,
       solution,
       type,

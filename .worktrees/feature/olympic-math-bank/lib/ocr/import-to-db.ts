@@ -9,6 +9,19 @@ import { knowledgeKeywords, getTagPath, getTagHierarchy } from './knowledge-keyw
 
 const prisma = new PrismaClient();
 
+/**
+ * 去除题干开头的题号
+ * 支持格式：1. 2. 1、 2、 (1) (2) 第1题 第2题 一、二、三 ① ② ③ 等
+ */
+function stripQuestionNumber(content: string): string {
+  if (!content) return content;
+  
+  // 匹配常见题号格式：数字+点/顿号、括号数字、中文数字+逗号、圆圈数字等
+  const pattern = /^\s*(\d+[\.、．]|第\s*\d+\s*题|[一二三四五六七八九十]+[、，,]|[\(（]\s*\d+\s*[\)）]|[\[【]?\d+[\]】]?|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[ⅰⅱⅲⅳⅴ]+[.、])\s*/;
+  
+  return content.replace(pattern, '');
+}
+
 export interface ImportResult {
   total: number;
   success: number;
@@ -82,10 +95,13 @@ export async function smartImportFromOCR(
       // 估算难度
       const difficulty = estimateDifficulty(parsed.content);
 
+      // 去除题干开头的题号
+      const cleanedContent = stripQuestionNumber(parsed.content);
+
       // 创建题目
       const question = await prisma.question.create({
         data: {
-          content: parsed.content,
+          content: cleanedContent,
           answer: parsed.answer || '',
           solution: parsed.analysis || '',
           type: questionType,
@@ -215,16 +231,36 @@ async function autoMatchKnowledgeTags(content: string, title?: string): Promise<
     return b.level - a.level;
   });
 
-  // 取前5个最匹配的标签
-  const topMatches = matchedScores.slice(0, 5);
+  // 只取最匹配的1个标签
+  const topMatch = matchedScores[0];
 
-  console.log(`[标签匹配] 找到 ${matchedScores.length} 个匹配标签，选择前 ${topMatches.length} 个:`);
-  topMatches.forEach(m => {
-    const path = getTagPath(m.tag);
-    console.log(`  - [L${m.level}] ${m.tagName} (分数: ${m.score}) - ${path}`);
-  });
+  if (topMatch) {
+    console.log(`[标签匹配] 最佳匹配: [L${topMatch.level}] ${topMatch.tagName} (分数: ${topMatch.score})`);
+    // 返回最匹配的标签及其所有父级标签ID
+    const tagWithParents = getTagAndParentIds(topMatch.tag);
+    console.log(`[标签匹配] 包含父级标签共 ${tagWithParents.length} 个`);
+    return tagWithParents;
+  }
 
-  return topMatches.map(m => m.tagId);
+  console.log(`[标签匹配] 未找到匹配标签`);
+  return [];
+}
+
+/**
+ * 获取标签及其所有父级标签的ID列表
+ */
+function getTagAndParentIds(tag: any): string[] {
+  const ids: string[] = [tag.id];
+  
+  // 遍历父级层级获取所有祖先标签ID
+  // level 5 -> level 4 -> level 3 -> level 2 -> level 1
+  let current = tag;
+  while (current.parent) {
+    ids.push(current.parent.id);
+    current = current.parent;
+  }
+  
+  return ids;
 }
 
 /**
