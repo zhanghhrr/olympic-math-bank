@@ -66,8 +66,12 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
   result = result.replace(imageRegex, (match, alt, url, w, h) => {
     const imgUrl = getImageUrl(url, baseUrl);
     const width = w || 200;
-    const height = h || Math.round(width * 0.75);
-    return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}" data-has-size="${!!(w && h)}" class="preview-image" style="width:${width}px;height:${height}px;display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;" />`;
+    // 如果有明确尺寸就用，否则让高度自适应保持原图比例
+    const hasSize = !!(w && h);
+    const sizeStyle = hasSize
+      ? `width:${width}px;height:${h}px;`
+      : `width:${width}px;height:auto;`;
+    return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${h || ''}" data-original="${match}" data-has-size="${hasSize}" class="preview-image" style="${sizeStyle}display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;" />`;
   });
 
   // 处理 LaTeX 公式
@@ -85,14 +89,17 @@ function markdownToEditHtml(text: string, baseUrl: string): string {
 
   let result = text;
 
-  // 先处理图片
+  // 先处理图片 - 用 span 包裹以便添加拖动手柄
   const imageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   result = result.replace(imageRegex, (match, alt, url, w, h) => {
     const imgUrl = getImageUrl(url, baseUrl);
     const width = w || 200;
-    const height = h || Math.round(width * 0.75);
-    const sizeStyle = w && h ? `width:${width}px;height:${height}px;` : 'max-width:300px;height:auto;';
-    return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}" data-has-size="${!!(w && h)}" class="edit-image" style="${sizeStyle}display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;cursor:se-resize;" />`;
+    const hasSize = !!(w && h);
+    // 如果有明确尺寸就用，否则让高度自适应保持原图比例
+    const sizeStyle = hasSize
+      ? `width:${width}px;height:${h}px;`
+      : `width:${width}px;height:auto;`;
+    return `<span class="image-container" style="position:relative;display:inline-block;${sizeStyle}vertical-align:middle;margin:4px;"><img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${h || ''}" data-original="${match}" data-has-size="${hasSize}" class="edit-image" style="${sizeStyle}display:block;border:1px solid #e5e7eb;border-radius:4px;pointer-events:none;" /><span class="resize-handle" style="position:absolute;bottom:0;right:0;width:24px;height:24px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:se-resize;display:flex;align-items:center;justify-content:center;color:white;opacity:0.8;pointer-events:none;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
   });
 
   // 处理 LaTeX 公式 - 显示源码
@@ -116,7 +123,26 @@ function markdownToEditHtml(text: string, baseUrl: string): string {
 function htmlToMarkdown(html: string): string {
   let text = html;
 
-  // 提取图片信息
+  // 提取图片信息 - 处理被 span.image-container 包裹的图片
+  text = text.replace(/<span class="image-container"[^>]*>[\s\S]*?<img[^>]+class="(?:preview-image|edit-image)"[^>]*>[\s\S]*?<\/span>/gi, (match) => {
+    const urlMatch = match.match(/data-url="([^"]+)"/);
+    const widthMatch = match.match(/data-width="([^"]+)"/);
+    const heightMatch = match.match(/data-height="([^"]+)"/);
+    const altMatch = match.match(/alt="([^"]+)"/);
+    const hasSizeMatch = match.match(/data-has-size="([^"]+)"/);
+
+    if (!urlMatch) return '';
+
+    const alt = altMatch ? altMatch[1] : '';
+    const hasSize = hasSizeMatch && hasSizeMatch[1] === 'true';
+
+    if (hasSize && widthMatch && heightMatch) {
+      return `![${alt}](${urlMatch[1]} =${widthMatch[1]}x${heightMatch[1]}=)`;
+    }
+    return `![${alt}](${urlMatch[1]})`;
+  });
+
+  // 也处理裸露的图片
   text = text.replace(/<img[^>]+class="(?:preview-image|edit-image)"[^>]*>/gi, (match) => {
     const urlMatch = match.match(/data-url="([^"]+)"/);
     const widthMatch = match.match(/data-width="([^"]+)"/);
@@ -211,10 +237,19 @@ export function VisualLatexEditor({
       const newHeight = Math.round(newWidth * dragRef.current.aspectRatio);
 
       const img = dragRef.current.target;
+      const container = img.parentElement;
+
+      // 更新图片尺寸
       img.style.width = `${newWidth}px`;
       img.style.height = `${newHeight}px`;
       img.setAttribute('data-width', String(newWidth));
       img.setAttribute('data-height', String(newHeight));
+
+      // 更新容器尺寸
+      if (container && container.classList.contains('image-container')) {
+        container.style.width = `${newWidth}px`;
+        container.style.height = `${newHeight}px`;
+      }
 
       setShowResizeHint({ x: e.clientX, y: e.clientY, width: newWidth });
       return;
@@ -222,16 +257,20 @@ export function VisualLatexEditor({
 
     // 显示拖动提示
     if (isEditing && target.tagName === 'IMG') {
-      const rect = target.getBoundingClientRect();
+      const img = target;
+      const container = img.parentElement;
+      const containerRect = container?.getBoundingClientRect() || img.getBoundingClientRect();
+
+      const relX = e.clientX - containerRect.left;
+      const relY = e.clientY - containerRect.top;
+
       const inCorner = (
-        e.clientX >= rect.right - 30 &&
-        e.clientY >= rect.bottom - 30 &&
-        e.clientX <= rect.right + 5 &&
-        e.clientY <= rect.bottom + 5
+        relX >= containerRect.width - 30 &&
+        relY >= containerRect.height - 30
       );
 
       if (inCorner) {
-        setShowResizeHint({ x: e.clientX, y: e.clientY, width: parseInt(target.getAttribute('data-width') || '200') });
+        setShowResizeHint({ x: e.clientX, y: e.clientY, width: parseInt(img.getAttribute('data-width') || '200') });
       } else {
         setShowResizeHint(null);
       }
@@ -244,27 +283,38 @@ export function VisualLatexEditor({
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
 
-    // 检查是否点击图片右下角
-    if (target.tagName === 'IMG') {
-      const rect = target.getBoundingClientRect();
+    // 检查是否点击图片或图片容器
+    const img = target.tagName === 'IMG' ? target : target.querySelector('img');
+    if (img) {
+      // 获取图片的实际 rect（考虑父容器）
+      const rect = img.getBoundingClientRect();
+      const containerRect = img.parentElement?.getBoundingClientRect() || rect;
+
+      // 计算相对于容器的点击位置
+      const relX = e.clientX - containerRect.left;
+      const relY = e.clientY - containerRect.top;
+      const containerWidth = containerRect.width;
+      const containerHeight = containerRect.height;
+
+      // 检查是否点击右下角区域（容器右下角 30x30 像素范围）
       const inCorner = (
-        e.clientX >= rect.right - 30 &&
-        e.clientY >= rect.bottom - 30 &&
-        e.clientX <= rect.right + 5 &&
-        e.clientY <= rect.bottom + 5
+        relX >= containerWidth - 30 &&
+        relY >= containerHeight - 30 &&
+        relX <= containerWidth + 5 &&
+        relY <= containerHeight + 5
       );
 
       if (inCorner) {
         e.preventDefault();
         e.stopPropagation();
 
-        const width = parseInt(target.getAttribute('data-width') || '200');
-        const height = parseInt(target.getAttribute('data-height') || '150');
+        const width = parseInt(img.getAttribute('data-width') || '200');
+        const height = parseInt(img.getAttribute('data-height') || '150');
         const aspectRatio = height / width;
 
         dragRef.current = {
           active: true,
-          target: target,
+          target: img,
           startX: e.clientX,
           startWidth: width,
           aspectRatio,
