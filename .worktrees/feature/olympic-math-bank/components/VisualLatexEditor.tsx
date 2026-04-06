@@ -228,18 +228,18 @@ export function VisualLatexEditor({
     }
   }, [isEditing, value, baseUrl]);
 
-  // 处理输入
+  // 处理输入 - 只更新内部状态，不频繁触发 onChange
   const handleInput = useCallback(() => {
-    // 如果是程序化设置内容，跳过
-    if (isSettingContentRef.current) return;
+    // 编辑时不做任何处理，避免中断编辑行为
+  }, []);
+
+  // 保存内容到父组件
+  const saveContent = useCallback(() => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
     const markdown = htmlToMarkdown(html);
-    // 只在内容变化时触发 onChange
-    if (markdown !== value) {
-      onChange(markdown);
-    }
-  }, [onChange, value]);
+    onChange(markdown);
+  }, [onChange]);
 
   // 鼠标移动 - 用于拖动和显示提示
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -413,14 +413,12 @@ export function VisualLatexEditor({
   const handleInsert = useCallback((text: string) => {
     editorRef.current?.focus();
     document.execCommand('insertText', false, text);
-    handleInput();
-  }, [handleInput]);
+  }, []);
 
   const handleLatexInsert = useCallback((latex: string) => {
     editorRef.current?.focus();
     document.execCommand('insertText', false, latex);
-    handleInput();
-  }, [handleInput]);
+  }, []);
 
   // 离开编辑模式
   const leaveEditMode = useCallback(() => {
