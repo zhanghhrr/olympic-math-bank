@@ -2,10 +2,24 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { LatexEditor } from '@/components/LatexEditor';
 
 interface QuestionFormProps {
   onSubmit: (data: any) => void;
   isSubmitting: boolean;
+  initialData?: Partial<{
+    content: string;
+    answer: string;
+    solution: string;
+    type: string;
+    grade: string;
+    difficulty: number;
+    source: string;
+    year: number;
+    competition: string;
+    tagIds: string[];
+    knowledgeTagIds: string[];
+  }>;
 }
 
 interface Tag {
@@ -27,7 +41,7 @@ interface KnowledgeTag {
   children?: KnowledgeTag[];
 }
 
-export function QuestionForm({ onSubmit, isSubmitting }: QuestionFormProps) {
+export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFormProps) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [knowledgeTree, setKnowledgeTree] = useState<KnowledgeTag[]>([]);
   const [selectedKnowledgeTags, setSelectedKnowledgeTags] = useState<string[]>([]);
@@ -40,17 +54,17 @@ export function QuestionForm({ onSubmit, isSubmitting }: QuestionFormProps) {
   const [selectedSkill, setSelectedSkill] = useState<string>('');
   
   const [formData, setFormData] = useState({
-    content: '',
-    answer: '',
-    solution: '',
-    type: 'SINGLE_CHOICE',
-    grade: 'P3',
-    difficulty: 3,
-    source: '',
-    year: new Date().getFullYear(),
-    competition: '',
-    tagIds: [] as string[],
-    knowledgeTagIds: [] as string[],
+    content: initialData?.content || '',
+    answer: initialData?.answer || '',
+    solution: initialData?.solution || '',
+    type: initialData?.type || 'SINGLE_CHOICE',
+    grade: initialData?.grade || 'P3',
+    difficulty: initialData?.difficulty || 3,
+    source: initialData?.source || '',
+    year: initialData?.year || new Date().getFullYear(),
+    competition: initialData?.competition || '',
+    tagIds: initialData?.tagIds || [],
+    knowledgeTagIds: initialData?.knowledgeTagIds || [],
   });
 
   useEffect(() => {
@@ -133,36 +147,31 @@ export function QuestionForm({ onSubmit, isSubmitting }: QuestionFormProps) {
 
       <div>
         <label className="block text-sm font-medium mb-2">题目内容</label>
-        <textarea
+        <LatexEditor
           value={formData.content}
-          onChange={e => setFormData({ ...formData, content: e.target.value })}
-          rows={6}
-          className="w-full px-3 py-2 border rounded-md"
+          onChange={(value) => setFormData({ ...formData, content: value })}
           placeholder="请输入题目内容，支持 LaTeX 公式"
-          required
+          rows={6}
         />
       </div>
 
       <div>
         <label className="block text-sm font-medium mb-2">答案</label>
-        <textarea
+        <LatexEditor
           value={formData.answer}
-          onChange={e => setFormData({ ...formData, answer: e.target.value })}
-          rows={3}
-          className="w-full px-3 py-2 border rounded-md"
+          onChange={(value) => setFormData({ ...formData, answer: value })}
           placeholder="请输入答案"
-          required
+          rows={3}
         />
       </div>
 
       <div>
         <label className="block text-sm font-medium mb-2">详细解答</label>
-        <textarea
+        <LatexEditor
           value={formData.solution}
-          onChange={e => setFormData({ ...formData, solution: e.target.value })}
-          rows={6}
-          className="w-full px-3 py-2 border rounded-md"
+          onChange={(value) => setFormData({ ...formData, solution: value })}
           placeholder="请输入详细解答步骤"
+          rows={6}
         />
       </div>
 
