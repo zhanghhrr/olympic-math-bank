@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import 'katex/dist/katex.min.css';
 
 @theme {
   --color-background: hsl(0 0% 100%);
