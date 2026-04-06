@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import katex from 'katex';
 import { useImageUrl } from '@/hooks/useImageUrl';
 import { ImageModal } from './ImageModal';
@@ -10,106 +10,103 @@ interface QuestionContentProps {
   className?: string;
 }
 
-// 解析 LaTeX 公式（处理所有格式）
-function renderLatex(text: string): string {
+// 渲染 LaTeX 公式并返回 HTML
+function renderLatexToHtml(text: string): string {
   if (!text) return text;
 
-  // 块级公式：$$...$$ 和 \[...\]
-  let result = text
-    .replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-      try {
-        return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
-      } catch {
-        return `$$${latex}$$`;
-      }
-    })
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
-      try {
-        return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
-      } catch {
-        return `\\[${latex}\\]`;
-      }
-    });
+  // 块级公式：$$...$$
+  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
+    try {
+      return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
+    } catch {
+      return `$$${latex}$$`;
+    }
+  });
 
-  // 行内公式：$...$ 和 \(...\)
-  result = result
-    .replace(/\$([^$\n]+?)\$/g, (_, latex) => {
-      try {
-        return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-      } catch {
-        return `$${latex}$`;
-      }
-    })
-    .replace(/\\\(([^)]+?)\\\)/g, (_, latex) => {
-      try {
-        return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-      } catch {
-        return `\\(${latex}\\)`;
-      }
-    });
+  // 块级公式：\[...\]
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
+    try {
+      return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
+    } catch {
+      return `\\[${latex}\\]`;
+    }
+  });
 
-  return result;
+  // 行内公式：$...$
+  text = text.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
+    try {
+      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
+    } catch {
+      return `$${latex}$`;
+    }
+  });
+
+  // 行内公式：\(...\)
+  text = text.replace(/\\\(([^)]+?)\\\)/g, (_, latex) => {
+    try {
+      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
+    } catch {
+      return `\\(${latex}\\)`;
+    }
+  });
+
+  return text;
 }
 
-// 解析图片（Markdown 和 HTML 格式）
-function parseImages(text: string, getImageUrl: (path: string) => string): Array<{ type: 'text' | 'image'; content: string; src?: string; alt?: string }> {
+// 处理内容，解析图片和 LaTeX
+function parseContent(text: string, getImageUrl: (path: string) => string) {
   const parts: Array<{ type: 'text' | 'image'; content: string; src?: string; alt?: string }> = [];
 
-  // Markdown 图片：![alt](url) 或 ![](url)
-  const mdImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-  // HTML 图片：<img src="..." alt="..." /> 或 <img ...>
-  const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  // 先渲染 LaTeX（这样图片中的 LaTeX 也会被处理）
+  const htmlContent = renderLatexToHtml(text);
+
+  // 匹配 Markdown 图片 ![alt](url) 和 HTML 图片 <img src="...">
+  const combinedRegex = /!\[([^\]]*)\]\(([^)]+)\)|<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 
   let lastIndex = 0;
   let match;
 
-  // 合并两种图片格式的位置
-  const imageMatches: Array<{ index: number; type: 'md' | 'html'; src: string; alt: string }> = [];
-
-  while ((match = mdImageRegex.exec(text)) !== null) {
-    imageMatches.push({ index: match.index, type: 'md', src: match[2], alt: match[1] });
-  }
-
-  mdImageRegex.lastIndex = 0;
-  while ((match = htmlImageRegex.exec(text)) !== null) {
-    const srcMatch = match[0].match(/src=["']([^"']+)["']/);
-    const altMatch = match[0].match(/alt=["']([^"']+)["']/);
-    imageMatches.push({
-      index: match.index,
-      type: 'html',
-      src: srcMatch ? srcMatch[1] : '',
-      alt: altMatch ? altMatch[1] : '',
-    });
-  }
-
-  // 按位置排序
-  imageMatches.sort((a, b) => a.index - b.index);
-
-  // 移除 HTML 图片标签（用占位符代替）
-  let cleanText = text.replace(/<img[^>]+>/gi, '<<<IMAGE>>>');
-
-  // 按位置切分文本
-  imageMatches.forEach((img) => {
-    const beforeText = cleanText.substring(lastIndex, img.index);
-    if (beforeText) {
-      parts.push({ type: 'text', content: beforeText });
+  while ((match = combinedRegex.exec(htmlContent)) !== null) {
+    // 添加图片之前的文本
+    if (match.index > lastIndex) {
+      const textBefore = htmlContent.substring(lastIndex, match.index);
+      if (textBefore) {
+        parts.push({ type: 'text', content: textBefore });
+      }
     }
-    parts.push({
-      type: 'image',
-      content: img.type === 'md' ? `![${img.alt}](${img.src})` : img.src,
-      src: getImageUrl(img.src),
-      alt: img.alt,
-    });
-    lastIndex = img.index + (img.type === 'md' ? `![${img.alt}](${img.src})`.length : text.substring(img.index).match(/<img[^>]+>/)?.[0].length || 0);
-  });
 
-  // 最后一段文本
-  const remainingText = cleanText.substring(lastIndex);
-  if (remainingText) {
-    parts.push({ type: 'text', content: remainingText });
+    if (match[0].startsWith('![')) {
+      // Markdown 图片
+      parts.push({
+        type: 'image',
+        content: match[0],
+        src: getImageUrl(match[2]),
+        alt: match[1],
+      });
+      lastIndex = match.index + match[0].length;
+    } else {
+      // HTML 图片
+      const srcMatch = match[0].match(/src=["']([^"']+)["']/);
+      const altMatch = match[0].match(/alt=["']([^"']+)["']/);
+      parts.push({
+        type: 'image',
+        content: match[0],
+        src: getImageUrl(srcMatch ? srcMatch[1] : ''),
+        alt: altMatch ? altMatch[1] : '',
+      });
+      lastIndex = match.index + match[0].length;
+    }
   }
 
-  return parts.length > 0 ? parts : [{ type: 'text', content: text }];
+  // 添加剩余文本
+  if (lastIndex < htmlContent.length) {
+    const remaining = htmlContent.substring(lastIndex);
+    if (remaining) {
+      parts.push({ type: 'text', content: remaining });
+    }
+  }
+
+  return parts.length > 0 ? parts : [{ type: 'text', content: htmlContent }];
 }
 
 export function QuestionContent({ content, className = '' }: QuestionContentProps) {
@@ -117,7 +114,7 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
   const [modalImage, setModalImage] = useState<{ src: string; alt: string } | null>(null);
 
   const renderedContent = useMemo(() => {
-    const parts = parseImages(content, getImageUrl);
+    const parts = parseContent(content, getImageUrl);
     return parts.map((part, index) => {
       if (part.type === 'image') {
         return (
@@ -130,12 +127,10 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
           />
         );
       }
-      // 渲染 LaTeX
-      const html = renderLatex(part.content);
       return (
         <span
           key={index}
-          dangerouslySetInnerHTML={{ __html: html }}
+          dangerouslySetInnerHTML={{ __html: part.content }}
           className="question-text"
         />
       );
