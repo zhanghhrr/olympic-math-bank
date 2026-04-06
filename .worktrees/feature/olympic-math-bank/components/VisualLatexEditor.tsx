@@ -82,9 +82,9 @@ function autoWrapLatex(text: string): string {
     return `__WRAPPED_IMAGE_${wrappedPatterns.length - 1}__`;
   });
 
-  // 匹配需要包装的数学表达式
+  // 匹配需要包装的数学表达式（排除包含下划线的，下划线是填空题的空）
   // 模式：包含数学符号的字母数字组合，如 x^2, a+b, A=, sin(x), log_2
-  const mathPattern = /(?<![$\w])([a-zA-Z][a-zA-Z0-9_]*(?:\^[0-9]?|[0-9]|_[a-zA-Z0-9]|)?(?:\s*[=\+\-\*\/×÷^]\s*[a-zA-Z0-9_]+(?:\^[0-9]?|[0-9]|_[a-zA-Z0-9]|)?)+|[a-zA-Z](?:\s*[=\+\-\*\/×÷^]\s*[0-9]+)+|[xyza-z]\s*[+\-*/=]\s*[xyza-z0-9]+|sin|cos|tan|log|ln|lg|\d+[+\-*/=]\d+)(?![$\w])/g;
+  const mathPattern = /(?<![$\w])([a-zA-Z][a-zA-Z0-9]*(?:\^[0-9]?|[0-9])?(?:\s*[=\+\-\*\/×÷^]\s*[a-zA-Z0-9]+(?:\^[0-9]?)?)+|[a-zA-Z](?:\s*[=\+\-\*\/×÷^]\s*[0-9]+)+|[xyza-z]\s*[+\-*/=]\s*[xyza-z0-9]+|sin|cos|tan|log|ln|lg|\d+[+\-*/=]\d+)(?![$\w])/g;
 
   result = result.replace(mathPattern, (match) => {
     return `$${match.trim()}$`;
