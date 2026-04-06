@@ -87,6 +87,11 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
 function markdownToEditHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
+  // 如果内容已经包含 latex-source 或 image-container，说明是已处理过的，跳过
+  if (text.includes('class="latex-source"') || text.includes('class="image-container"')) {
+    return text;
+  }
+
   let result = text;
 
   // 先处理图片 - 用 span 包裹以便添加拖动手柄
