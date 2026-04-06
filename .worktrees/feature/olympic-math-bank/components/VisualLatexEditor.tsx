@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import katex from 'katex';
+import { GripHorizontal, GripCorner } from 'lucide-react';
 import { LatexToolbar } from './LatexToolbar';
 
 // 获取图片完整 URL
@@ -12,27 +12,6 @@ function getImageUrl(path: string, baseUrl: string): string {
     return `${baseUrl}/api/images/${path}`;
   }
   return `${baseUrl}/${path}`;
-}
-
-// 渲染单个 LaTeX 公式
-function renderLatex(latex: string, displayMode: boolean): string {
-  try {
-    return katex.renderToString(latex.trim(), { displayMode, throwOnError: false });
-  } catch {
-    return displayMode ? `$$${latex}$$` : `$${latex}$`;
-  }
-}
-
-// 渲染文本中的 LaTeX 公式
-function renderLatexInText(text: string): string {
-  if (!text) return text;
-
-  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => renderLatex(latex, true));
-  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => renderLatex(latex, true));
-  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => renderLatex(latex, false));
-  text = text.replace(/\$([^$\n]+?)\$/g, (_, latex) => renderLatex(latex, false));
-
-  return text;
 }
 
 // 解析 markdown 图片语法
@@ -64,68 +43,82 @@ function parseImages(text: string): ImageData[] {
   return images;
 }
 
-// 将 markdown 内容转换为 HTML
-function markdownToHtml(text: string, baseUrl: string): string {
+// 将 markdown 内容转换为用于预览的 HTML（渲染 LaTeX）
+function markdownToPreviewHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
-  const images = parseImages(text);
-  if (images.length === 0) {
-    return renderLatexInText(text);
-  }
+  let result = text;
 
-  let html = '';
-  let lastIndex = 0;
-
-  images.forEach((img) => {
-    const pos = text.indexOf(img.match, lastIndex);
-
-    if (pos > lastIndex) {
-      html += renderLatexInText(text.substring(lastIndex, pos));
+  // 块级公式：$$...$$ - 先不处理，避免与 $...$ 冲突
+  // 处理行内公式 $...$
+  const latexInlineRegex = /\$([^$\n]+?)\$/g;
+  result = result.replace(latexInlineRegex, (_, latex) => {
+    try {
+      return `<span class="katex-inline" data-latex="${latex.replace(/"/g, '&quot;')}">${latex}</span>`;
+    } catch {
+      return `$${latex}$`;
     }
-
-    const imgUrl = getImageUrl(img.url, baseUrl);
-    html += `<img src="${imgUrl}" alt="${img.alt}" data-width="${img.width}" data-height="${img.height}" data-orig-width="${img.width}" data-orig-height="${img.height}" class="resizable-image" style="width:${img.width}px;height:${img.height}px;display:inline-block;vertical-align:middle;margin:0 4px;border:1px solid #e5e7eb;border-radius:4px;cursor:ew-resize;" />`;
-
-    lastIndex = pos + img.match.length;
   });
 
-  if (lastIndex < text.length) {
-    html += renderLatexInText(text.substring(lastIndex));
-  }
+  // 处理块级公式 \[...\]
+  result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
+    try {
+      return `<span class="katex-block" data-latex="${latex.replace(/"/g, '&quot;')}">${latex}</span>`;
+    } catch {
+      return `\\[${latex}\\]`;
+    }
+  });
 
-  return html;
+  // 处理块级公式 $$...$$
+  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
+    try {
+      return `<span class="katex-block" data-latex="${latex.replace(/"/g, '&quot;')}">${latex}</span>`;
+    } catch {
+      return `$$${latex}$$`;
+    }
+  });
+
+    // 处理图片
+    result = result.replace(imageRegex, (match, alt, url, w, h) => {
+      const width = w || 200;
+      const height = h || Math.round(width * 0.75);
+      const imgUrl = getImageUrl(url, baseUrl);
+      return `<span class="image-wrapper" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}"><img src="${imgUrl}" alt="${alt}" width="${width}" height="${height}" class="content-image" style="width:${width}px;height:${height}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+    });
+
+  return result;
+}
+
+// 将 markdown 内容转换为用于编辑的纯文本（公式不渲染）
+function markdownToEditText(text: string): string {
+  if (!text) return '';
+  // 直接返回原文，图片语法保持不变
+  return text;
 }
 
 // 将 HTML 转回 markdown
-function htmlToMarkdown(html: string): string {
+function htmlToMarkdown(html: string, baseUrl: string): string {
   let text = html;
 
-  text = text.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, (match) => {
-    const srcMatch = match.match(/src=["']([^"']+)["']/);
-    const altMatch = match.match(/alt=["']([^"']+)["']/);
-    const widthMatch = match.match(/data-width=["']([^"']+)["']/);
-    const heightMatch = match.match(/data-height=["']([^"']+)["']/);
+  // 提取图片信息
+  text = text.replace(/<span class="image-wrapper"[^>]*>[\s\S]*?<img[^>]+src="[^"]*"[^>]*>([\s\S]*?)<\/span>/gi, (match, markdown) => {
+    // 直接使用保存的 markdown 语法
+    const urlMatch = match.match(/data-url="([^"]+)"/);
+    const widthMatch = match.match(/data-width="([^"]+)"/);
+    const heightMatch = match.match(/data-height="([^"]+)"/);
+    const altMatch = match.match(/alt="([^"]+)"/);
 
-    if (!srcMatch) return '';
-
-    const src = srcMatch[1];
-    const alt = altMatch ? altMatch[1] : '';
-    const w = widthMatch ? widthMatch[1] : '';
-    const h = heightMatch ? heightMatch[1] : '';
-
-    let cleanUrl = src;
-    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
-    if (src.startsWith(baseUrl)) {
-      cleanUrl = src.substring(baseUrl.length);
-      if (cleanUrl.startsWith('/api/images/')) {
-        cleanUrl = cleanUrl.substring('/api/images/'.length);
-      }
+    if (urlMatch && widthMatch && heightMatch) {
+      const alt = altMatch ? altMatch[1] : '';
+      return `![${alt}](${urlMatch[1]} =${widthMatch[1]}x${heightMatch[1]}=)`;
     }
+    return markdown.trim();
+  });
 
-    if (w && h) {
-      return `![${alt}](${cleanUrl} =${w}x${h}=)`;
-    }
-    return `![${alt}](${cleanUrl})`;
+  // 清理其他标签，保留 LaTeX 源码
+  text = text.replace(/<span class="katex-(?:inline|block)"[^>]*>([\s\S]*?)<\/span>/gi, (_, latex) => {
+    // 直接返回原始 LaTeX 语法
+    return latex;
   });
 
   text = text.replace(/<[^>]+>/g, '');
@@ -163,41 +156,40 @@ export function VisualLatexEditor({
     startX: number;
     startY: number;
     startWidth: number;
-    startHeight: number;
     aspectRatio: number;
-  }>({ active: false, target: null, startX: 0, startY: 0, startWidth: 0, startHeight: 0, aspectRatio: 1 });
+  }>({ active: false, target: null, startX: 0, startY: 0, startWidth: 0, aspectRatio: 1 });
 
-  // 初始化编辑器内容
+  // 初始化编辑器内容 - 编辑模式显示纯文本
   useEffect(() => {
     if (isEditing && editorRef.current) {
-      const html = markdownToHtml(value, baseUrl);
-      if (editorRef.current.innerHTML !== html) {
-        editorRef.current.innerHTML = html;
+      const editText = markdownToEditText(value);
+      if (editorRef.current.innerText !== editText) {
+        editorRef.current.innerText = editText;
       }
     }
-  }, [isEditing, value, baseUrl]);
+  }, [isEditing, value]);
 
-  // 处理内容变化
+  // 处理输入
   const handleInput = useCallback(() => {
     if (!editorRef.current) return;
-    const html = editorRef.current.innerHTML;
-    const markdown = htmlToMarkdown(html);
-    onChange(markdown);
+    const text = editorRef.current.innerText;
+    onChange(text);
   }, [onChange]);
 
-  // 鼠标按下 - 检测是否点击图片右下角调整区域
-  const handleEditorMouseDown = useCallback((e: React.MouseEvent) => {
+  // 鼠标按下
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
 
-    // 如果点击的是图片
-    if (target.tagName === 'IMG' && target.classList.contains('resizable-image')) {
-      const rect = target.getBoundingClientRect();
-      const img = target as HTMLImageElement;
+    // 检查是否点击图片
+    const img = target.closest('.content-image') as HTMLImageElement;
+    if (img) {
+      const wrapper = img.parentElement;
+      if (!wrapper) return;
 
-      // 检测是否点击右下角 25x25 区域
+      const rect = img.getBoundingClientRect();
       const inCorner = (
-        e.clientX >= rect.right - 25 &&
-        e.clientY >= rect.bottom - 25 &&
+        e.clientX >= rect.right - 30 &&
+        e.clientY >= rect.bottom - 30 &&
         e.clientX <= rect.right &&
         e.clientY <= rect.bottom
       );
@@ -206,8 +198,8 @@ export function VisualLatexEditor({
         e.preventDefault();
         e.stopPropagation();
 
-        const width = parseInt(img.getAttribute('data-width') || '200');
-        const height = parseInt(img.getAttribute('data-height') || '150');
+        const width = parseInt(wrapper.getAttribute('data-width') || '200');
+        const height = parseInt(wrapper.getAttribute('data-height') || '150');
         const aspectRatio = height / width;
 
         dragRef.current = {
@@ -216,7 +208,6 @@ export function VisualLatexEditor({
           startX: e.clientX,
           startY: e.clientY,
           startWidth: width,
-          startHeight: height,
           aspectRatio,
         };
 
@@ -225,7 +216,7 @@ export function VisualLatexEditor({
       }
     }
 
-    // 其他情况进入编辑模式
+    // 点击其他区域进入编辑模式
     if (!isEditing) {
       setIsEditing(true);
     }
@@ -242,26 +233,41 @@ export function VisualLatexEditor({
     const newHeight = Math.round(newWidth * dragRef.current.aspectRatio);
 
     const img = dragRef.current.target;
+    const wrapper = img.parentElement;
+
     img.style.width = `${newWidth}px`;
     img.style.height = `${newHeight}px`;
-    img.setAttribute('data-width', String(newWidth));
-    img.setAttribute('data-height', String(newHeight));
+    if (wrapper) {
+      wrapper.setAttribute('data-width', String(newWidth));
+      wrapper.setAttribute('data-height', String(newHeight));
+    }
   }, []);
 
   // 鼠标松开
   const handleMouseUp = useCallback(() => {
     if (dragRef.current.active && dragRef.current.target) {
       const img = dragRef.current.target;
+      const wrapper = img.parentElement;
       img.style.opacity = '1';
 
-      // 保存变化
-      const html = editorRef.current?.innerHTML || '';
-      const markdown = htmlToMarkdown(html);
-      onChange(markdown);
+      // 保存变化到 value
+      if (wrapper) {
+        const url = wrapper.getAttribute('data-url') || '';
+        const width = wrapper.getAttribute('data-width') || '200';
+        const height = wrapper.getAttribute('data-height') || '150';
+        const newMarkdown = `![](${url} =${width}x${height}=)`;
+
+        // 替换原文中的旧图片语法
+        const oldMarkdown = wrapper.getAttribute('data-original') || '';
+        if (oldMarkdown) {
+          const newValue = value.replace(oldMarkdown, newMarkdown);
+          onChange(newValue);
+        }
+      }
     }
 
-    dragRef.current = { active: false, target: null, startX: 0, startY: 0, startWidth: 0, startHeight: 0, aspectRatio: 1 };
-  }, [onChange]);
+    dragRef.current = { active: false, target: null, startX: 0, startY: 0, startWidth: 0, aspectRatio: 1 };
+  }, [value, onChange]);
 
   // 全局鼠标事件
   useEffect(() => {
@@ -291,19 +297,21 @@ export function VisualLatexEditor({
 
   const handleLatexInsert = useCallback((latex: string) => {
     editorRef.current?.focus();
-    const html = renderLatexInText(latex);
-    document.execCommand('insertHTML', false, html);
+    document.execCommand('insertText', false, latex);
     handleInput();
   }, [handleInput]);
 
   // 离开编辑模式
   const leaveEditMode = useCallback(() => {
-    if (editorRef.current) {
-      const html = editorRef.current.innerHTML;
-      const markdown = htmlToMarkdown(html);
-      onChange(markdown);
-    }
-    setIsEditing(false);
+    setTimeout(() => {
+      if (!editorRef.current?.contains(document.activeElement)) {
+        if (editorRef.current) {
+          const text = editorRef.current.innerText;
+          onChange(text);
+        }
+        setIsEditing(false);
+      }
+    }, 100);
   }, [onChange]);
 
   // 预览模式渲染
@@ -312,52 +320,43 @@ export function VisualLatexEditor({
       return <span className="text-gray-400 text-sm">{placeholder}</span>;
     }
 
-    const images = parseImages(value);
-    if (images.length === 0) {
-      const html = renderLatexInText(value);
-      return <span dangerouslySetInnerHTML={{ __html: html }} />;
-    }
+    const html = markdownToPreviewHtml(value, baseUrl);
 
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-
-    images.forEach((img, idx) => {
-      const pos = value.indexOf(img.match, lastIndex);
-
-      if (pos > lastIndex) {
-        const text = value.substring(lastIndex, pos);
-        const html = renderLatexInText(text);
-        parts.push(<span key={`t${idx}`} dangerouslySetInnerHTML={{ __html: html }} />);
-      }
-
-      const imgUrl = getImageUrl(img.url, baseUrl);
-      parts.push(
-        <span key={`i${idx}`} className="relative inline-block">
-          <img
-            src={imgUrl}
-            alt={img.alt}
-            width={img.width}
-            height={img.height}
-            style={{ width: img.width, height: img.height }}
-            className="inline-block align-middle mx-1 border border-gray-200 rounded"
-          />
-        </span>
-      );
-
-      lastIndex = pos + img.match.length;
-    });
-
-    if (lastIndex < value.length) {
-      const text = value.substring(lastIndex);
-      const html = renderLatexInText(text);
-      parts.push(<span key="end" dangerouslySetInnerHTML={{ __html: html }} />);
-    }
-
-    return <>{parts}</>;
+    return <span dangerouslySetInnerHTML={{ __html: html }} />;
   };
 
   return (
     <div className={`border rounded-lg overflow-hidden ${className}`}>
+      <style>{`
+        .image-wrapper {
+          position: relative;
+          display: inline-block;
+        }
+        .content-image {
+          display: block;
+          border: 1px solid #e5e7eb;
+          border-radius: 4px;
+        }
+        .resize-handle {
+          position: absolute;
+          bottom: 2px;
+          right: 2px;
+          width: 20px;
+          height: 20px;
+          background: rgba(59, 130, 246, 0.9);
+          border-radius: 4px 0 4px 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: se-resize;
+          opacity: 0;
+          transition: opacity 0.2s;
+          color: white;
+        }
+        .image-wrapper:hover .resize-handle {
+          opacity: 1;
+        }
+      `}</style>
       {isEditing ? (
         <>
           <LatexToolbar onInsert={handleInsert} onLatexInsert={handleLatexInsert} />
@@ -367,12 +366,12 @@ export function VisualLatexEditor({
             onInput={handleInput}
             onPaste={handlePaste}
             onBlur={leaveEditMode}
-            onMouseDown={handleEditorMouseDown}
-            className="min-h-[150px] px-3 py-2 focus:outline-none leading-relaxed"
+            onMouseDown={handleMouseDown}
+            className="min-h-[150px] px-3 py-2 focus:outline-none leading-relaxed font-mono text-sm whitespace-pre-wrap"
             style={{ whiteSpace: 'pre-wrap' }}
           />
           <div className="border-t px-3 py-2 bg-gray-50 text-xs text-gray-500">
-            输入 ![alt](url) 插入图片，拖动图片右下角调整大小
+            编辑模式：公式显示为源码，输入 markdown 图片语法如 ![alt](url =WxH=)
           </div>
         </>
       ) : (
