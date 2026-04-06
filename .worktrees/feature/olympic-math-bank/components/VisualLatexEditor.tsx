@@ -56,7 +56,8 @@ function renderLatexToHtml(latex: string, displayMode: boolean): string {
 }
 
 // 自动包装裸 LaTeX 表达式为 $...$ 格式
-// 排除：已包装的内容、图片语法、纯中文、纯数字
+// 只包装：连续的字母（A, x, abc）或连续的数字（1, 123）
+// 排除：已包装的内容、图片语法、中文、下划线（填空题的空）
 function autoWrapLatex(text: string): string {
   if (!text) return text;
 
@@ -82,19 +83,16 @@ function autoWrapLatex(text: string): string {
     return `__WRAPPED_IMAGE_${wrappedPatterns.length - 1}__`;
   });
 
-  // 匹配需要包装的数学表达式（排除包含下划线的，下划线是填空题的空）
-  // 模式：包含数学符号的字母数字组合，如 x^2, a+b, A=, sin(x), log_2
-  const mathPattern = /(?<![$\w])([a-zA-Z][a-zA-Z0-9]*(?:\^[0-9]?|[0-9])?(?:\s*[=\+\-\*\/×÷^]\s*[a-zA-Z0-9]+(?:\^[0-9]?)?)+|[a-zA-Z](?:\s*[=\+\-\*\/×÷^]\s*[0-9]+)+|[xyza-z]\s*[+\-*/=]\s*[xyza-z0-9]+|sin|cos|tan|log|ln|lg|\d+[+\-*/=]\d+)(?![$\w])/g;
-
-  result = result.replace(mathPattern, (match) => {
-    return `$${match.trim()}$`;
+  // 匹配连续字母（如 A, x, abc），但排除下划线
+  const letterPattern = /(?<![$\w])[a-zA-Z]+(?![$\w_])/g;
+  result = result.replace(letterPattern, (match) => {
+    return `$${match}$`;
   });
 
-  // 匹配单个大写字母变量后跟 = 或其他运算符，如 A=, B+, C-
-  const singleVarPattern = /(?<![$\w])([A-Z])(?=\s*[=+\-*/×÷])|(?<![$\w])([A-Z])(?=\s*$)/g;
-  result = result.replace(singleVarPattern, (match, p1, p2) => {
-    const varName = p1 || p2;
-    return `$${varName}$`;
+  // 匹配连续数字（如 1, 123）
+  const numberPattern = /(?<![$\w])\d+(?![$\w])/g;
+  result = result.replace(numberPattern, (match) => {
+    return `$${match}$`;
   });
 
   // 恢复占位符
