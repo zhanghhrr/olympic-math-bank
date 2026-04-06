@@ -23,6 +23,7 @@ interface ImageData {
   width: number;
   height: number;
   aspectRatio: number;
+  hasSize: boolean;
 }
 
 function parseImages(text: string): ImageData[] {
@@ -30,15 +31,16 @@ function parseImages(text: string): ImageData[] {
   const regex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   let m;
   while ((m = regex.exec(text)) !== null) {
-    const w = m[3] ? parseInt(m[3]) : 200;
-    const h = m[4] ? parseInt(m[4]) : 150;
+    const w = m[3] ? parseInt(m[3]) : 0;
+    const h = m[4] ? parseInt(m[4]) : 0;
     images.push({
       match: m[0],
       alt: m[1],
       url: m[2],
-      width: w,
-      height: h,
-      aspectRatio: h / w,
+      width: w || 200,
+      height: h || 150,
+      aspectRatio: h && w ? h / w : 0.75,
+      hasSize: !!(w && h),
     });
   }
   return images;
@@ -53,7 +55,7 @@ function renderLatexToHtml(latex: string, displayMode: boolean): string {
   }
 }
 
-// 将 markdown 内容转换为预览 HTML（图片+渲染的 LaTeX）
+// 将 markdown 内容转换为预览 HTML
 function markdownToPreviewHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
@@ -63,14 +65,9 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
   const imageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   result = result.replace(imageRegex, (match, alt, url, w, h) => {
     const imgUrl = getImageUrl(url, baseUrl);
-
-    // 如果没有指定尺寸，使用 max-width 让图片保持原始比例
-    if (!w || !h) {
-      return `<span class="image-wrapper" data-url="${url}" data-width="200" data-height="150" data-original="${match}" data-has-size="false"><img src="${imgUrl}" alt="${alt}" class="content-image" style="max-width:300px;height:auto;" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
-    }
-
-    // 有尺寸指定
-    return `<span class="image-wrapper" data-url="${url}" data-width="${w}" data-height="${h}" data-original="${match}" data-has-size="true"><img src="${imgUrl}" alt="${alt}" width="${w}" height="${h}" class="content-image" style="width:${w}px;height:${h}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+    const width = w || 200;
+    const height = h || Math.round(width * 0.75);
+    return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}" data-has-size="${!!(w && h)}" class="preview-image" style="width:${width}px;height:${height}px;display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;" />`;
   });
 
   // 处理 LaTeX 公式
@@ -82,7 +79,7 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
   return result;
 }
 
-// 将 markdown 内容转换为编辑 HTML（图片可视化，LaTeX 显示源码）
+// 将 markdown 内容转换为编辑 HTML
 function markdownToEditHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
@@ -92,52 +89,46 @@ function markdownToEditHtml(text: string, baseUrl: string): string {
   const imageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   result = result.replace(imageRegex, (match, alt, url, w, h) => {
     const imgUrl = getImageUrl(url, baseUrl);
-
-    // 如果没有指定尺寸，使用 max-width 让图片保持原始比例
-    if (!w || !h) {
-      return `<span class="image-wrapper" data-url="${url}" data-width="200" data-height="150" data-original="${match}" data-has-size="false"><img src="${imgUrl}" alt="${alt}" class="content-image" style="max-width:300px;height:auto;" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
-    }
-
-    // 有尺寸指定
-    return `<span class="image-wrapper" data-url="${url}" data-width="${w}" data-height="${h}" data-original="${match}" data-has-size="true"><img src="${imgUrl}" alt="${alt}" width="${w}" height="${h}" class="content-image" style="width:${w}px;height:${h}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+    const width = w || 200;
+    const height = h || Math.round(width * 0.75);
+    const sizeStyle = w && h ? `width:${width}px;height:${height}px;` : 'max-width:300px;height:auto;';
+    return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}" data-has-size="${!!(w && h)}" class="edit-image" style="${sizeStyle}display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;cursor:se-resize;" />`;
   });
 
-  // 处理 LaTeX 公式 - 只处理 $...$ 格式，保持源码显示
-  // 使用特殊标记包裹 LaTeX 源码，这样可以在编辑时选择
+  // 处理 LaTeX 公式 - 显示源码
   result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="$$${latex}$$">$$${latex}$$</span>`;
+    return `<span class="latex-source" data-latex="$$${latex}$$" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">$$${latex}$$</span>`;
   });
   result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="\\[${latex}\\]">\\[${latex}\\]</span>`;
+    return `<span class="latex-source" data-latex="\\[${latex}\\]" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">\\[${latex}\\]</span>`;
   });
   result = result.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="\\(${latex}\\)">\\(${latex}\\)</span>`;
+    return `<span class="latex-source" data-latex="\\(${latex}\\)" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">\\(${latex}\\)</span>`;
   });
   result = result.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="$${latex}$">$${latex}$</span>`;
+    return `<span class="latex-source" data-latex="$${latex}$" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">$${latex}$</span>`;
   });
 
   return result;
 }
 
 // 将 HTML 转回 markdown
-function htmlToMarkdown(html: string, baseUrl: string): string {
+function htmlToMarkdown(html: string): string {
   let text = html;
 
   // 提取图片信息
-  text = text.replace(/<span class="image-wrapper"[^>]*>[\s\S]*?<img[^>]+src="[^"]*"[^>]*>[\s\S]*?<\/span>/gi, (match) => {
+  text = text.replace(/<img[^>]+class="(?:preview-image|edit-image)"[^>]*>/gi, (match) => {
     const urlMatch = match.match(/data-url="([^"]+)"/);
     const widthMatch = match.match(/data-width="([^"]+)"/);
     const heightMatch = match.match(/data-height="([^"]+)"/);
     const altMatch = match.match(/alt="([^"]+)"/);
     const hasSizeMatch = match.match(/data-has-size="([^"]+)"/);
 
-    if (!urlMatch) return match;
+    if (!urlMatch) return '';
 
     const alt = altMatch ? altMatch[1] : '';
     const hasSize = hasSizeMatch && hasSizeMatch[1] === 'true';
 
-    // 只有明确设置过尺寸的才保存尺寸
     if (hasSize && widthMatch && heightMatch) {
       return `![${alt}](${urlMatch[1]} =${widthMatch[1]}x${heightMatch[1]}=)`;
     }
@@ -176,6 +167,7 @@ export function VisualLatexEditor({
 }: VisualLatexEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
+  const [showResizeHint, setShowResizeHint] = useState<{ x: number; y: number; width: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
 
@@ -202,24 +194,62 @@ export function VisualLatexEditor({
   const handleInput = useCallback(() => {
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
-    const markdown = htmlToMarkdown(html, baseUrl);
+    const markdown = htmlToMarkdown(html);
     onChange(markdown);
-  }, [onChange, baseUrl]);
+  }, [onChange]);
+
+  // 鼠标移动 - 用于拖动和显示提示
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+
+    // 如果正在拖动
+    if (dragRef.current.active && dragRef.current.target) {
+      e.preventDefault();
+
+      const deltaX = e.clientX - dragRef.current.startX;
+      const newWidth = Math.max(50, Math.min(800, dragRef.current.startWidth + deltaX));
+      const newHeight = Math.round(newWidth * dragRef.current.aspectRatio);
+
+      const img = dragRef.current.target;
+      img.style.width = `${newWidth}px`;
+      img.style.height = `${newHeight}px`;
+      img.setAttribute('data-width', String(newWidth));
+      img.setAttribute('data-height', String(newHeight));
+
+      setShowResizeHint({ x: e.clientX, y: e.clientY, width: newWidth });
+      return;
+    }
+
+    // 显示拖动提示
+    if (isEditing && target.tagName === 'IMG') {
+      const rect = target.getBoundingClientRect();
+      const inCorner = (
+        e.clientX >= rect.right - 30 &&
+        e.clientY >= rect.bottom - 30 &&
+        e.clientX <= rect.right + 5 &&
+        e.clientY <= rect.bottom + 5
+      );
+
+      if (inCorner) {
+        setShowResizeHint({ x: e.clientX, y: e.clientY, width: parseInt(target.getAttribute('data-width') || '200') });
+      } else {
+        setShowResizeHint(null);
+      }
+    } else {
+      setShowResizeHint(null);
+    }
+  }, [isEditing]);
 
   // 鼠标按下
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
 
     // 检查是否点击图片右下角
-    const img = target.closest('.content-image') as HTMLImageElement;
-    if (img) {
-      const wrapper = img.parentElement;
-      if (!wrapper) return;
-
-      const rect = img.getBoundingClientRect();
+    if (target.tagName === 'IMG') {
+      const rect = target.getBoundingClientRect();
       const inCorner = (
-        e.clientX >= rect.right - 25 &&
-        e.clientY >= rect.bottom - 25 &&
+        e.clientX >= rect.right - 30 &&
+        e.clientY >= rect.bottom - 30 &&
         e.clientX <= rect.right + 5 &&
         e.clientY <= rect.bottom + 5
       );
@@ -228,26 +258,25 @@ export function VisualLatexEditor({
         e.preventDefault();
         e.stopPropagation();
 
-        const width = parseInt(wrapper.getAttribute('data-width') || '200');
-        const height = parseInt(wrapper.getAttribute('data-height') || '150');
+        const width = parseInt(target.getAttribute('data-width') || '200');
+        const height = parseInt(target.getAttribute('data-height') || '150');
         const aspectRatio = height / width;
 
         dragRef.current = {
           active: true,
-          target: img,
+          target: target,
           startX: e.clientX,
           startWidth: width,
           aspectRatio,
         };
 
-        img.style.opacity = '0.8';
+        setShowResizeHint({ x: e.clientX, y: e.clientY, width });
         return;
       }
     }
 
-    // 检查是否点击 LaTeX 源码区域
+    // 检查是否点击 LaTeX 源码
     if (target.classList.contains('latex-source')) {
-      // 选中整个 span 以便用户可以编辑
       const range = document.createRange();
       range.selectNodeContents(target);
       const sel = window.getSelection();
@@ -261,65 +290,22 @@ export function VisualLatexEditor({
     }
   }, [isEditing]);
 
-  // 双击图片预览
-  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-
-    // 检查是否双击了图片
-    const img = target.closest('.content-image') as HTMLImageElement;
-    if (img) {
-      e.preventDefault();
-      e.stopPropagation();
-      const src = img.src;
-      const alt = img.alt || '';
-      setPreviewImage({ src, alt });
-    }
-  }, []);
-
-  // 鼠标移动
-  const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!dragRef.current.active || !dragRef.current.target) return;
-
-    e.preventDefault();
-
-    const deltaX = e.clientX - dragRef.current.startX;
-    const newWidth = Math.max(50, Math.min(800, dragRef.current.startWidth + deltaX));
-    const newHeight = Math.round(newWidth * dragRef.current.aspectRatio);
-
-    const img = dragRef.current.target;
-    const wrapper = img.parentElement;
-
-    img.style.width = `${newWidth}px`;
-    img.style.height = `${newHeight}px`;
-    if (wrapper) {
-      wrapper.setAttribute('data-width', String(newWidth));
-      wrapper.setAttribute('data-height', String(newHeight));
-    }
-  }, []);
-
   // 鼠标松开
   const handleMouseUp = useCallback(() => {
-    if (dragRef.current.active && dragRef.current.target) {
+    if (dragRef.current.active) {
       const img = dragRef.current.target;
-      const wrapper = img.parentElement;
-      img.style.opacity = '1';
-
-      if (wrapper) {
-        const url = wrapper.getAttribute('data-url') || '';
-        const width = wrapper.getAttribute('data-width') || '200';
-        const height = wrapper.getAttribute('data-height') || '150';
-        const newMarkdown = `![](${url} =${width}x${height}=)`;
-
-        const oldMarkdown = wrapper.getAttribute('data-original') || '';
-        if (oldMarkdown) {
-          const newValue = value.replace(oldMarkdown, newMarkdown);
-          onChange(newValue);
-        }
+      if (img) {
+        // 更新 data-has-size 为 true
+        img.setAttribute('data-has-size', 'true');
+        const html = editorRef.current?.innerHTML || '';
+        const markdown = htmlToMarkdown(html);
+        onChange(markdown);
       }
     }
 
     dragRef.current = { active: false, target: null, startX: 0, startWidth: 0, aspectRatio: 1 };
-  }, [value, onChange]);
+    setShowResizeHint(null);
+  }, [onChange]);
 
   // 全局鼠标事件
   useEffect(() => {
@@ -358,63 +344,34 @@ export function VisualLatexEditor({
     setTimeout(() => {
       if (!editorRef.current?.contains(document.activeElement)) {
         const html = editorRef.current?.innerHTML || '';
-        const markdown = htmlToMarkdown(html, baseUrl);
+        const markdown = htmlToMarkdown(html);
         onChange(markdown);
         setIsEditing(false);
       }
     }, 100);
-  }, [onChange, baseUrl]);
+  }, [onChange]);
+
+  // 双击预览
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'IMG') {
+      e.preventDefault();
+      e.stopPropagation();
+      setPreviewImage({ src: target.src, alt: target.alt || '' });
+    }
+  }, []);
 
   // 预览模式渲染
   const renderPreview = () => {
     if (!value) {
       return <span className="text-gray-400 text-sm">{placeholder}</span>;
     }
-
     const html = markdownToPreviewHtml(value, baseUrl);
     return <span dangerouslySetInnerHTML={{ __html: html }} />;
   };
 
   return (
     <div className={`border rounded-lg overflow-hidden ${className}`}>
-      <style>{`
-        .image-wrapper {
-          position: relative;
-          display: inline-block;
-          vertical-align: middle;
-        }
-        .content-image {
-          display: block;
-          border: 1px solid #e5e7eb;
-          border-radius: 4px;
-        }
-        .resize-handle {
-          position: absolute;
-          bottom: 0;
-          right: 0;
-          width: 22px;
-          height: 22px;
-          background: rgba(59, 130, 246, 0.9);
-          border-radius: 4px 0 0 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: se-resize;
-          opacity: 0;
-          transition: opacity 0.2s;
-          color: white;
-        }
-        .image-wrapper:hover .resize-handle {
-          opacity: 1;
-        }
-        .latex-source {
-          font-family: monospace;
-          background: #f3f4f6;
-          padding: 0 4px;
-          border-radius: 2px;
-          color: #7c3aed;
-        }
-      `}</style>
       {isEditing ? (
         <>
           <LatexToolbar onInsert={handleInsert} onLatexInsert={handleLatexInsert} />
@@ -430,7 +387,7 @@ export function VisualLatexEditor({
             style={{ whiteSpace: 'pre-wrap' }}
           />
           <div className="border-t px-3 py-2 bg-gray-50 text-xs text-gray-500">
-            编辑模式：图片可拖动右下角调整大小，双击图片预览
+            编辑模式：图片拖动右下角调整大小，公式显示源码，双击图片预览
           </div>
         </>
       ) : (
@@ -441,6 +398,18 @@ export function VisualLatexEditor({
           {renderPreview()}
         </div>
       )}
+      {/* 拖动尺寸提示 */}
+      {showResizeHint && (
+        <div
+          className="fixed bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none z-50"
+          style={{
+            left: showResizeHint.x + 10,
+            top: showResizeHint.y - 30,
+          }}
+        >
+          {showResizeHint.width}px
+        </div>
+      )}
       {/* 图片预览模态框 */}
       {previewImage && (
         <div
@@ -449,7 +418,7 @@ export function VisualLatexEditor({
         >
           <div className="relative max-w-4xl max-h-full p-4">
             <button
-              className="absolute top-2 right-2 text-white text-2xl font-bold hover:text-gray-300"
+              className="absolute top-2 right-2 text-white text-2xl font-bold hover:text-gray-300 bg-black/50 rounded-full w-10 h-10 flex items-center justify-center"
               onClick={() => setPreviewImage(null)}
             >
               ×
