@@ -167,9 +167,15 @@ function htmlToMarkdown(html: string): string {
     return `![${alt}](${urlMatch[1]})`;
   });
 
-  // 提取 LaTeX 源码
-  text = text.replace(/<span class="latex-source"[^>]*data-latex="([^"]+)"[^>]*>[\s\S]*?<\/span>/gi, (_, latex) => {
-    return latex;
+  // 提取 LaTeX 源码 - 使用 data-latex 属性，如果没有则使用 span 的文本内容
+  text = text.replace(/<span class="latex-source"[^>]*>([\s\S]*?)<\/span>/gi, (match, content) => {
+    // 尝试从 data-latex 属性获取
+    const dataLatexMatch = match.match(/data-latex="([^"]+)"/);
+    if (dataLatexMatch) {
+      return dataLatexMatch[1];
+    }
+    // 如果没有 data-latex，返回原始文本内容
+    return content;
   });
 
   // 清理其他标签
@@ -358,13 +364,11 @@ export function VisualLatexEditor({
       }
     }
 
-    // 检查是否点击 LaTeX 源码
+    // 检查是否点击 LaTeX 源码 - 将其转换为可编辑状态
     if (target.classList.contains('latex-source')) {
-      const range = document.createRange();
-      range.selectNodeContents(target);
+      // 取消选中，让用户可以直接编辑
       const sel = window.getSelection();
       sel?.removeAllRanges();
-      sel?.addRange(range);
       return;
     }
 
