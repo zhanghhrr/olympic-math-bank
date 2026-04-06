@@ -61,49 +61,77 @@ function renderLatexToHtml(latex: string, displayMode: boolean): string {
 function autoWrapLatex(text: string): string {
   if (!text) return text;
 
-  // 临时替换已包装的 LaTeX 表达式，防止重复包装
-  const wrappedPatterns: string[] = [];
+  // 第一步：保护已包装的内容 - 记录所有已包装的 $...$ 和 $$...$$
+  const protectedRanges: { start: number; end: number; content: string }[] = [];
   let result = text;
 
-  // 替换 $$...$$ 为占位符
-  result = result.replace(/\$\$[\s\S]*?\$\$/g, (match) => {
-    wrappedPatterns.push(match);
-    return `__WRAPPED_LATEX_${wrappedPatterns.length - 1}__`;
+  // 匹配 $$...$$ (display math)
+  const displayRegex = /\$\$[\s\S]*?\$\$/g;
+  // 匹配 $...$ (inline math) - 但要排除已经是 $$...$$ 的
+  const inlineRegex = /(?<!\\)\$[^$\n]+\$(?!\$)/g;
+
+  // 找到所有已包装的内容并记录位置
+  let match;
+  const allMatches: { start: number; end: number; content: string }[] = [];
+
+  // 匹配 $$...$$
+  while ((match = displayRegex.exec(text)) !== null) {
+    allMatches.push({ start: match.index, end: match.index + match[0].length, content: match[0] });
+  }
+
+  // 匹配 $...$（但排除 $$）
+  const inlineMatches: { start: number; end: number; content: string }[] = [];
+  const inlineRegex2 = /(?<!\$)\$[^$\n]+\$(?!\$)/g;
+  while ((match = inlineRegex2.exec(text)) !== null) {
+    // 检查是否与已找到的 $$ 重叠
+    const overlaps = allMatches.some(m => match!.index >= m.start && match!.index < m.end);
+    if (!overlaps) {
+      inlineMatches.push({ start: match.index, end: match.index + match[0].length, content: match[0] });
+    }
+  }
+
+  // 合并所有匹配
+  const allRanges = [...allMatches, ...inlineMatches].sort((a, b) => a.start - b.start);
+
+  // 提取所有已包装内容的片段
+  const segments: string[] = [];
+  let lastEnd = 0;
+  for (const range of allRanges) {
+    if (range.start > lastEnd) {
+      // 这部分是需要处理的裸内容
+      segments.push(text.slice(lastEnd, range.start));
+    }
+    lastEnd = range.end;
+  }
+  if (lastEnd < text.length) {
+    segments.push(text.slice(lastEnd));
+  }
+
+  // 对每个裸内容片段进行处理，包装字母和数字
+  const processedSegments = segments.map(segment => {
+    // 匹配连续字母
+    let processed = segment.replace(/([a-zA-Z]+)/g, '$$$1$');
+    // 匹配连续数字
+    processed = processed.replace(/(\d+)/g, '$$$1$');
+    return processed;
   });
 
-  // 替换 $...$ 为占位符
-  result = result.replace(/\$[^$\n]+?\$/g, (match) => {
-    wrappedPatterns.push(match);
-    return `__WRAPPED_LATEX_${wrappedPatterns.length - 1}__`;
-  });
+  // 重建结果：交替插入保护内容和处理过的片段
+  let finalResult = '';
+  let segmentIndex = 0;
+  for (const range of allRanges) {
+    if (range.start > (allRanges[segmentIndex - 1]?.end || 0)) {
+      finalResult += processedSegments[segmentIndex] || '';
+      segmentIndex++;
+    }
+    finalResult += range.content;
+  }
+  // 处理最后一个片段
+  if (segmentIndex < processedSegments.length) {
+    finalResult += processedSegments[segmentIndex] || '';
+  }
 
-  // 替换图片语法为占位符
-  result = result.replace(/!\[[^\]]*\]\([^)]+\)/g, (match) => {
-    wrappedPatterns.push(match);
-    return `__WRAPPED_IMAGE_${wrappedPatterns.length - 1}__`;
-  });
-
-  // 匹配连续字母（如 A, x, abc），但排除下划线
-  const letterPattern = /(?<![$\w])[a-zA-Z]+(?![$\w_])/g;
-  result = result.replace(letterPattern, (match) => {
-    return `$${match}$`;
-  });
-
-  // 匹配连续数字（如 1, 123）
-  const numberPattern = /(?<![$\w])\d+(?![$\w])/g;
-  result = result.replace(numberPattern, (match) => {
-    return `$${match}$`;
-  });
-
-  // 恢复占位符
-  wrappedPatterns.forEach((pattern, index) => {
-    result = result.replace(`__WRAPPED_LATEX_${index}__`, pattern);
-  });
-  result = result.replace(/__WRAPPED_IMAGE_(\d+)__/g, (match, index) => {
-    return wrappedPatterns[parseInt(index)] || match;
-  });
-
-  return result;
+  return finalResult;
 }
 
 // 将 markdown 内容转换为预览 HTML
