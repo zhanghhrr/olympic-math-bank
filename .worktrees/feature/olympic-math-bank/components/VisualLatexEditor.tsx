@@ -62,10 +62,15 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
   // 先处理图片
   const imageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   result = result.replace(imageRegex, (match, alt, url, w, h) => {
-    const width = w || 200;
-    const height = h || Math.round(width * 0.75);
     const imgUrl = getImageUrl(url, baseUrl);
-    return `<span class="image-wrapper" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}"><img src="${imgUrl}" alt="${alt}" width="${width}" height="${height}" class="content-image" style="width:${width}px;height:${height}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+
+    // 如果没有指定尺寸，使用 max-width 让图片保持原始比例
+    if (!w || !h) {
+      return `<span class="image-wrapper" data-url="${url}" data-width="200" data-height="150" data-original="${match}" data-has-size="false"><img src="${imgUrl}" alt="${alt}" class="content-image" style="max-width:300px;height:auto;" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+    }
+
+    // 有尺寸指定
+    return `<span class="image-wrapper" data-url="${url}" data-width="${w}" data-height="${h}" data-original="${match}" data-has-size="true"><img src="${imgUrl}" alt="${alt}" width="${w}" height="${h}" class="content-image" style="width:${w}px;height:${h}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
   });
 
   // 处理 LaTeX 公式
@@ -86,10 +91,15 @@ function markdownToEditHtml(text: string, baseUrl: string): string {
   // 先处理图片
   const imageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   result = result.replace(imageRegex, (match, alt, url, w, h) => {
-    const width = w || 200;
-    const height = h || Math.round(width * 0.75);
     const imgUrl = getImageUrl(url, baseUrl);
-    return `<span class="image-wrapper" data-url="${url}" data-width="${width}" data-height="${height}" data-original="${match}"><img src="${imgUrl}" alt="${alt}" width="${width}" height="${height}" class="content-image" style="width:${width}px;height:${height}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+
+    // 如果没有指定尺寸，使用 max-width 让图片保持原始比例
+    if (!w || !h) {
+      return `<span class="image-wrapper" data-url="${url}" data-width="200" data-height="150" data-original="${match}" data-has-size="false"><img src="${imgUrl}" alt="${alt}" class="content-image" style="max-width:300px;height:auto;" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
+    }
+
+    // 有尺寸指定
+    return `<span class="image-wrapper" data-url="${url}" data-width="${w}" data-height="${h}" data-original="${match}" data-has-size="true"><img src="${imgUrl}" alt="${alt}" width="${w}" height="${h}" class="content-image" style="width:${w}px;height:${h}px" /><span class="resize-handle"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></span></span>`;
   });
 
   // 处理 LaTeX 公式 - 只处理 $...$ 格式，保持源码显示
@@ -120,12 +130,18 @@ function htmlToMarkdown(html: string, baseUrl: string): string {
     const widthMatch = match.match(/data-width="([^"]+)"/);
     const heightMatch = match.match(/data-height="([^"]+)"/);
     const altMatch = match.match(/alt="([^"]+)"/);
+    const hasSizeMatch = match.match(/data-has-size="([^"]+)"/);
 
-    if (urlMatch && widthMatch && heightMatch) {
-      const alt = altMatch ? altMatch[1] : '';
+    if (!urlMatch) return match;
+
+    const alt = altMatch ? altMatch[1] : '';
+    const hasSize = hasSizeMatch && hasSizeMatch[1] === 'true';
+
+    // 只有明确设置过尺寸的才保存尺寸
+    if (hasSize && widthMatch && heightMatch) {
       return `![${alt}](${urlMatch[1]} =${widthMatch[1]}x${heightMatch[1]}=)`;
     }
-    return match;
+    return `![${alt}](${urlMatch[1]})`;
   });
 
   // 提取 LaTeX 源码
@@ -159,6 +175,7 @@ export function VisualLatexEditor({
   className = '',
 }: VisualLatexEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
 
@@ -243,6 +260,21 @@ export function VisualLatexEditor({
       setIsEditing(true);
     }
   }, [isEditing]);
+
+  // 双击图片预览
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+
+    // 检查是否双击了图片
+    const img = target.closest('.content-image') as HTMLImageElement;
+    if (img) {
+      e.preventDefault();
+      e.stopPropagation();
+      const src = img.src;
+      const alt = img.alt || '';
+      setPreviewImage({ src, alt });
+    }
+  }, []);
 
   // 鼠标移动
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -393,11 +425,12 @@ export function VisualLatexEditor({
             onPaste={handlePaste}
             onBlur={leaveEditMode}
             onMouseDown={handleMouseDown}
+            onDoubleClick={handleDoubleClick}
             className="min-h-[150px] px-3 py-2 focus:outline-none leading-relaxed text-sm"
             style={{ whiteSpace: 'pre-wrap' }}
           />
           <div className="border-t px-3 py-2 bg-gray-50 text-xs text-gray-500">
-            编辑模式：图片可拖动右下角调整，公式显示源码
+            编辑模式：图片可拖动右下角调整大小，双击图片预览
           </div>
         </>
       ) : (
@@ -406,6 +439,28 @@ export function VisualLatexEditor({
           className="min-h-[100px] px-3 py-2 cursor-text leading-relaxed"
         >
           {renderPreview()}
+        </div>
+      )}
+      {/* 图片预览模态框 */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-full p-4">
+            <button
+              className="absolute top-2 right-2 text-white text-2xl font-bold hover:text-gray-300"
+              onClick={() => setPreviewImage(null)}
+            >
+              ×
+            </button>
+            <img
+              src={previewImage.src}
+              alt={previewImage.alt}
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
         </div>
       )}
     </div>
