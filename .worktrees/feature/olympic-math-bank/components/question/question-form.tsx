@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { LatexEditor } from '@/components/LatexEditor';
+import { InlineLatexEditor } from '@/components/InlineLatexEditor';
 
 interface QuestionFormProps {
   onSubmit: (data: any) => void;
@@ -147,7 +147,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
 
       <div>
         <label className="block text-sm font-medium mb-2">题目内容</label>
-        <LatexEditor
+        <InlineLatexEditor
           value={formData.content}
           onChange={(value) => setFormData({ ...formData, content: value })}
           placeholder="请输入题目内容，支持 LaTeX 公式"
@@ -157,7 +157,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
 
       <div>
         <label className="block text-sm font-medium mb-2">答案</label>
-        <LatexEditor
+        <InlineLatexEditor
           value={formData.answer}
           onChange={(value) => setFormData({ ...formData, answer: value })}
           placeholder="请输入答案"
@@ -167,7 +167,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
 
       <div>
         <label className="block text-sm font-medium mb-2">详细解答</label>
-        <LatexEditor
+        <InlineLatexEditor
           value={formData.solution}
           onChange={(value) => setFormData({ ...formData, solution: value })}
           placeholder="请输入详细解答步骤"

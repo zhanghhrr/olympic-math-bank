@@ -55,16 +55,29 @@ function renderLatexToHtml(text: string): string {
 
 // 处理内容，解析图片和 LaTeX
 function parseContent(text: string, getImageUrl: (path: string) => string) {
-  const parts: Array<{ type: 'text' | 'image'; content: string; src?: string; alt?: string }> = [];
+  const parts: Array<{
+    type: 'text' | 'image';
+    content: string;
+    src?: string;
+    alt?: string;
+    width?: number;
+    height?: number;
+  }> = [];
 
   // 先渲染 LaTeX（这样图片中的 LaTeX 也会被处理）
   const htmlContent = renderLatexToHtml(text);
 
-  // 匹配 Markdown 图片 ![alt](url) 和 HTML 图片 <img src="...">
-  const combinedRegex = /!\[([^\]]*)\]\(([^)]+)\)|<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  // 匹配 Markdown 图片，支持 =WxH= 尺寸语法
+  // 格式：![alt](url =WxH=) 或 ![alt](url "width x height")
+  const mdImageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+(?:=([0-9]+)x([0-9]+)=|"([^"]+)")?)?\)/gi;
+  // 匹配 HTML 图片 <img src="...">
+  const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 
   let lastIndex = 0;
   let match;
+
+  // 处理 Markdown 图片
+  const combinedRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+(?:=([0-9]+)x([0-9]+)=|"([^"]+)")?)?\)|<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 
   while ((match = combinedRegex.exec(htmlContent)) !== null) {
     // 添加图片之前的文本
@@ -76,12 +89,33 @@ function parseContent(text: string, getImageUrl: (path: string) => string) {
     }
 
     if (match[0].startsWith('![')) {
-      // Markdown 图片
+      // Markdown 图片，解析尺寸
+      const alt = match[1];
+      const url = match[2];
+      let width: number | undefined;
+      let height: number | undefined;
+
+      // 解析 =WxH= 格式
+      if (match[3] && match[4]) {
+        width = parseInt(match[3], 10);
+        height = parseInt(match[4], 10);
+      }
+      // 解析 "width x height" 格式
+      else if (match[5]) {
+        const dimParts = match[5].split('x');
+        if (dimParts.length === 2) {
+          width = parseInt(dimParts[0].trim(), 10);
+          height = parseInt(dimParts[1].trim(), 10);
+        }
+      }
+
       parts.push({
         type: 'image',
         content: match[0],
-        src: getImageUrl(match[2]),
-        alt: match[1],
+        src: getImageUrl(url),
+        alt,
+        width,
+        height,
       });
       lastIndex = match.index + match[0].length;
     } else {
@@ -122,8 +156,11 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
             key={index}
             src={part.src}
             alt={part.alt}
-            className="max-w-full h-auto cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => setModalImage({ src: part.src!, alt: part.alt })}
+            width={part.width}
+            height={part.height}
+            style={part.width ? { width: part.width, height: part.height || 'auto' } : undefined}
+            className={part.width ? '' : 'max-w-full h-auto'}
+            onClick={() => setModalImage({ src: part.src!, alt: part.alt || '' })}
           />
         );
       }
