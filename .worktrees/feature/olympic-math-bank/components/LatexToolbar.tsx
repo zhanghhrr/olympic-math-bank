@@ -1,27 +1,38 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import katex from 'katex';
 
 interface LatexToolbarProps {
   onInsert: (text: string) => void;
+  onLatexInsert?: (latex: string) => void;
+}
+
+// 渲染 LaTeX 到 HTML
+function renderLatexToHtml(latex: string, displayMode: boolean = false): string {
+  try {
+    return katex.renderToString(latex.trim(), { displayMode, throwOnError: false });
+  } catch {
+    return displayMode ? `$$${latex}$$` : `$${latex}$`;
+  }
 }
 
 // LaTeX 数学公式按钮配置
 const latexButtons = [
-  { label: '分数', insert: '\\(\\frac{}{}\\)', tooltip: '分数' },
-  { label: '根号', insert: '\\(\\sqrt{}\\)', tooltip: '根号' },
-  { label: '上标', insert: '^{}', tooltip: '上标' },
-  { label: '下标', insert: '_{}', tooltip: '下标' },
-  { label: '×', insert: ' \\times ', tooltip: '乘号' },
-  { label: '÷', insert: ' \\div ', tooltip: '除号' },
-  { label: '≥', insert: ' \\geq ', tooltip: '大于等于' },
-  { label: '≤', insert: ' \\leq ', tooltip: '小于等于' },
-  { label: '±', insert: ' \\pm ', tooltip: '正负' },
-  { label: '∞', insert: ' \\infty ', tooltip: '无穷' },
-  { label: '∫', insert: '\\(\\int_{}^{}\\)', tooltip: '积分' },
-  { label: '∑', insert: '\\(\\sum_{}^{}\\)', tooltip: '求和' },
-  { label: '≈', insert: ' \\approx ', tooltip: '约等于' },
-  { label: '≠', insert: ' \\neq ', tooltip: '不等于' },
+  { label: '分数', template: '\\(\\frac{}{}\\)', tooltip: '分数' },
+  { label: '根号', template: '\\(\\sqrt{}\\)', tooltip: '根号' },
+  { label: '上标', template: '^{}', tooltip: '上标' },
+  { label: '下标', template: '_{}', tooltip: '下标' },
+  { label: '×', template: ' \\times ', tooltip: '乘号' },
+  { label: '÷', template: ' \\div ', tooltip: '除号' },
+  { label: '≥', template: ' \\geq ', tooltip: '大于等于' },
+  { label: '≤', template: ' \\leq ', tooltip: '小于等于' },
+  { label: '±', template: ' \\pm ', tooltip: '正负' },
+  { label: '∞', template: ' \\infty ', tooltip: '无穷' },
+  { label: '∫', template: '\\(\\int_{}^{}\\)', tooltip: '积分' },
+  { label: '∑', template: '\\(\\sum_{}^{}\\)', tooltip: '求和' },
+  { label: '≈', template: ' \\approx ', tooltip: '约等于' },
+  { label: '≠', template: ' \\neq ', tooltip: '不等于' },
 ];
 
 // 文本格式按钮配置
@@ -33,9 +44,19 @@ const textButtons = [
   { label: '右', insert: ':::right\n文本\n:::\n', tooltip: '居右' },
 ];
 
-export function LatexToolbar({ onInsert }: LatexToolbarProps) {
+export function LatexToolbar({ onInsert, onLatexInsert }: LatexToolbarProps) {
   const handleClick = (insert: string) => {
     onInsert(insert);
+  };
+
+  const handleLatexClick = (template: string) => {
+    if (onLatexInsert) {
+      // 提取 LaTeX 内容并渲染为 HTML
+      onLatexInsert(template);
+    } else {
+      // 回退到纯文本插入
+      onInsert(template);
+    }
   };
 
   return (
@@ -47,7 +68,7 @@ export function LatexToolbar({ onInsert }: LatexToolbarProps) {
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => handleClick(btn.insert)}
+            onClick={() => handleLatexClick(btn.template)}
             className="h-8 px-2 text-xs font-mono"
             title={btn.tooltip}
           >

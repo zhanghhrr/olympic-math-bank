@@ -1,182 +1,151 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import katex from 'katex';
 import { GripVertical } from 'lucide-react';
 import { LatexToolbar } from './LatexToolbar';
-import { useImageUrl } from '@/hooks/useImageUrl';
 
-// 渲染 LaTeX 到 HTML
-function renderLatexToHtml(text: string): string {
+// 获取图片完整 URL
+function getImageUrl(path: string, baseUrl: string): string {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  if (path.startsWith('images/')) {
+    return `${baseUrl}/api/images/${path}`;
+  }
+  return `${baseUrl}/${path}`;
+}
+
+// 渲染单个 LaTeX 公式
+function renderLatex(latex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(latex.trim(), { displayMode, throwOnError: false });
+  } catch {
+    return displayMode ? `$$${latex}$$` : `$${latex}$`;
+  }
+}
+
+// 渲染文本中的 LaTeX 公式
+function renderLatexInText(text: string): string {
   if (!text) return text;
 
   // 块级公式：$$...$$
-  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
-    } catch {
-      return `$$${latex}$$`;
-    }
-  });
+  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => renderLatex(latex, true));
 
   // 块级公式：\[...\]
-  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
-    } catch {
-      return `\\[${latex}\\]`;
-    }
-  });
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => renderLatex(latex, true));
 
   // 行内公式：\(...\)
-  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-    } catch {
-      return `\\(${latex}\\)`;
-    }
-  });
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => renderLatex(latex, false));
 
   // 行内公式：$...$
-  text = text.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-    } catch {
-      return `$${latex}$`;
-    }
-  });
+  text = text.replace(/\$([^$\n]+?)\$/g, (_, latex) => renderLatex(latex, false));
 
   return text;
 }
 
-// 解析 markdown 图片语法，提取尺寸信息
-interface ImageInfo {
-  fullMatch: string;
+// 解析 markdown 图片语法
+interface ImageData {
+  match: string;
   alt: string;
   url: string;
-  width?: number;
-  height?: number;
+  width: number;
+  height: number;
 }
 
-function parseImages(text: string): ImageInfo[] {
-  const images: ImageInfo[] = [];
-  // 匹配：![alt](url =WxH=) 或 ![alt](url)
+function parseImages(text: string): ImageData[] {
+  const images: ImageData[] = [];
   const regex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    const w = m[3] ? parseInt(m[3]) : 200;
     images.push({
-      fullMatch: match[0],
-      alt: match[1],
-      url: match[2],
-      width: match[3] ? parseInt(match[3]) : undefined,
-      height: match[4] ? parseInt(match[4]) : undefined,
+      match: m[0],
+      alt: m[1],
+      url: m[2],
+      width: w,
+      height: Math.round(w * 0.75),
     });
   }
   return images;
 }
 
-// 可调整尺寸的图片组件
-interface InlineResizableImageProps {
-  src: string;
-  alt: string;
-  width: number;
-  height?: number;
-  isSelected: boolean;
-  onSelect: () => void;
-  onResize: (newWidth: number, newHeight?: number) => void;
+// 将 markdown 内容转换为 HTML（用于 contenteditable）
+function markdownToHtml(text: string, baseUrl: string): string {
+  if (!text) return '';
+
+  const images = parseImages(text);
+  if (images.length === 0) {
+    return renderLatexInText(text);
+  }
+
+  let html = '';
+  let lastIndex = 0;
+
+  images.forEach((img) => {
+    const pos = text.indexOf(img.match, lastIndex);
+
+    // 文本部分
+    if (pos > lastIndex) {
+      html += renderLatexInText(text.substring(lastIndex, pos));
+    }
+
+    // 图片
+    const imgUrl = getImageUrl(img.url, baseUrl);
+    html += `<img src="${imgUrl}" alt="${img.alt}" data-width="${img.width}" data-height="${img.height}" style="width:${img.width}px;height:${img.height}px;display:inline-block;vertical-align:middle;margin:0 4px;border:1px solid #e5e7eb;border-radius:4px;" />`;
+
+    lastIndex = pos + img.match.length;
+  });
+
+  // 剩余文本
+  if (lastIndex < text.length) {
+    html += renderLatexInText(text.substring(lastIndex));
+  }
+
+  return html;
 }
 
-function InlineResizableImage({
-  src,
-  alt,
-  width,
-  height,
-  isSelected,
-  onSelect,
-  onResize,
-}: InlineResizableImageProps) {
-  const [isDragging, setIsDragging] = useState(false);
-  const [currentWidth, setCurrentWidth] = useState(width);
-  const startXRef = useRef(0);
-  const startWidthRef = useRef(0);
-  const aspectRatio = height && width ? height / width : 0.75;
+// 将 HTML 转回 markdown
+function htmlToMarkdown(html: string): string {
+  let text = html;
 
-  // 同步外部宽度变化
-  useEffect(() => {
-    setCurrentWidth(width);
-  }, [width]);
+  // 替换图片
+  text = text.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, (match) => {
+    const srcMatch = match.match(/src=["']([^"']+)["']/);
+    const altMatch = match.match(/alt=["']([^"']+)["']/);
+    const widthMatch = match.match(/data-width=["']([^"']+)["']/);
+    const heightMatch = match.match(/data-height=["']([^"']+)["']/);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-    startXRef.current = e.clientX;
-    startWidthRef.current = currentWidth;
-    onSelect();
-  }, [currentWidth, onSelect]);
+    if (!srcMatch) return '';
 
-  useEffect(() => {
-    if (!isDragging) return;
+    const src = srcMatch[1];
+    const alt = altMatch ? altMatch[1] : '';
+    const w = widthMatch ? widthMatch[1] : '';
+    const h = heightMatch ? heightMatch[1] : '';
 
-    const handleMouseMove = (e: MouseEvent) => {
-      const delta = e.clientX - startXRef.current;
-      const newWidth = Math.max(50, Math.min(800, startWidthRef.current + delta));
-      setCurrentWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      if (currentWidth !== startWidthRef.current) {
-        onResize(currentWidth);
+    // 移除 API 前缀获取原始路径
+    let cleanUrl = src;
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+    if (src.startsWith(baseUrl)) {
+      cleanUrl = src.substring(baseUrl.length);
+      if (cleanUrl.startsWith('/api/images/')) {
+        cleanUrl = cleanUrl.substring('/api/images/'.length);
       }
-    };
+    }
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    if (w && h) {
+      return `![${alt}](${cleanUrl} =${w}x${h}=)`;
+    }
+    return `![${alt}](${cleanUrl})`;
+  });
 
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, currentWidth, onResize]);
+  // 清理其他 HTML 标签
+  text = text.replace(/<[^>]+>/g, '');
+  text = text.replace(/&nbsp;/g, ' ');
+  text = text.replace(/&lt;/g, '<');
+  text = text.replace(/&gt;/g, '>');
+  text = text.replace(/&amp;/g, '&');
 
-  const displayHeight = Math.round(currentWidth * aspectRatio);
-
-  return (
-    <span
-      className={`relative inline-block align-middle mx-1 group ${isSelected ? 'ring-2 ring-blue-500 rounded' : ''}`}
-      style={{ width: currentWidth, height: displayHeight }}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-    >
-      <img
-        src={src}
-        alt={alt}
-        className="w-full h-full object-contain rounded"
-        draggable={false}
-      />
-      {/* 左侧拖动手柄 - 始终显示 */}
-      <span
-        className={`absolute left-0 top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center rounded-l transition-colors ${
-          isDragging
-            ? 'bg-blue-400'
-            : 'bg-gray-200/80 hover:bg-blue-300 opacity-0 group-hover:opacity-100'
-        }`}
-        style={{ top: '50%', transform: 'translateY(-50%)', height: '24px', marginTop: 0 }}
-        onMouseDown={handleMouseDown}
-      >
-        <GripVertical className="w-3 h-3 text-gray-600" />
-      </span>
-      {/* 宽度提示 */}
-      {isDragging && (
-        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">
-          {currentWidth}px
-        </span>
-      )}
-    </span>
-  );
+  return text;
 }
 
 interface VisualLatexEditorProps {
@@ -195,154 +164,219 @@ export function VisualLatexEditor({
   className = '',
 }: VisualLatexEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const { getImageUrl } = useImageUrl();
+  const [localHtml, setLocalHtml] = useState('');
+  const editorRef = useRef<HTMLDivElement>(null);
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
 
-  // 解析图片
-  const images = useMemo(() => parseImages(value), [value]);
+  // 拖动状态
+  const dragState = useRef<{
+    isDragging: boolean;
+    target: HTMLImageElement | null;
+    startX: number;
+    startWidth: number;
+  }>({ isDragging: false, target: null, startX: 0, startWidth: 0 });
 
-  // 处理图片尺寸调整
-  const handleImageResize = useCallback((index: number, newWidth: number) => {
-    const img = images[index];
-    if (!img) return;
+  // 初始化编辑器内容
+  useEffect(() => {
+    if (isEditing && editorRef.current) {
+      const html = markdownToHtml(value, baseUrl);
+      if (editorRef.current.innerHTML !== html) {
+        editorRef.current.innerHTML = html;
+        setLocalHtml(html);
+      }
+    }
+  }, [isEditing, value, baseUrl]);
 
-    const aspectRatio = img.height && img.width ? img.height / img.width : 0.75;
+  // 处理内容变化
+  const handleInput = useCallback(() => {
+    if (!editorRef.current) return;
+    const html = editorRef.current.innerHTML;
+    setLocalHtml(html);
+
+    // 转换为 markdown 并保存
+    const markdown = htmlToMarkdown(html);
+    onChange(markdown);
+  }, [onChange]);
+
+  // 处理图片拖动
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    const target = e.target as HTMLElement;
+
+    // 检查是否点击了图片
+    if (target.tagName === 'IMG') {
+      const img = target as HTMLImageElement;
+
+      // 检查是否点击了左侧调整区域（图片左边缘 20px 范围内）
+      const rect = img.getBoundingClientRect();
+      if (e.clientX - rect.left < 20) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        dragState.current = {
+          isDragging: true,
+          target: img,
+          startX: e.clientX,
+          startWidth: parseInt(img.getAttribute('data-width') || '200'),
+        };
+
+        img.style.opacity = '0.7';
+        img.style.cursor = 'ew-resize';
+      }
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!dragState.current.isDragging || !dragState.current.target) return;
+
+    const delta = e.clientX - dragState.current.startX;
+    const newWidth = Math.max(50, Math.min(800, dragState.current.startWidth + delta));
+
+    const img = dragState.current.target;
+    const aspectRatio = parseInt(img.getAttribute('data-height') || '150') / parseInt(img.getAttribute('data-width') || '200');
     const newHeight = Math.round(newWidth * aspectRatio);
 
-    // 更新 markdown 语法中的尺寸
-    const newImageMarkdown = `![${img.alt}](${img.url} =${newWidth}x${newHeight}=)`;
-    const newValue = value.replace(img.fullMatch, newImageMarkdown);
-    onChange(newValue);
-  }, [images, value, onChange]);
+    img.style.width = `${newWidth}px`;
+    img.style.height = `${newHeight}px`;
+    img.setAttribute('data-width', String(newWidth));
+    img.setAttribute('data-height', String(newHeight));
+
+    // 显示宽度提示
+    let tooltip = img.parentElement?.querySelector('.resize-tooltip') as HTMLElement;
+    if (!tooltip) {
+      tooltip = document.createElement('span');
+      tooltip.className = 'resize-tooltip absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-1.5 py-0.5 rounded whitespace-nowrap';
+      tooltip.style.position = 'absolute';
+      img.parentElement?.appendChild(tooltip);
+    }
+    tooltip.textContent = `${newWidth}px`;
+    tooltip.style.display = 'block';
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    if (dragState.current.isDragging && dragState.current.target) {
+      const img = dragState.current.target;
+      img.style.opacity = '1';
+      img.style.cursor = '';
+
+      // 隐藏提示
+      const tooltip = img.parentElement?.querySelector('.resize-tooltip') as HTMLElement;
+      if (tooltip) {
+        tooltip.style.display = 'none';
+      }
+
+      // 保存变化
+      const html = editorRef.current?.innerHTML || '';
+      setLocalHtml(html);
+      const markdown = htmlToMarkdown(html);
+      onChange(markdown);
+    }
+
+    dragState.current = { isDragging: false, target: null, startX: 0, startWidth: 0 };
+  }, [onChange]);
+
+  // 添加全局鼠标事件
+  useEffect(() => {
+    if (isEditing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [isEditing, handleMouseMove, handleMouseUp]);
+
+  // 处理粘贴（只接受纯文本）
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+  }, []);
 
   // 处理工具栏插入
   const handleInsert = useCallback((text: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
+    editorRef.current?.focus();
+    document.execCommand('insertText', false, text);
+    handleInput();
+  }, [handleInput]);
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const newValue = value.substring(0, start) + text + value.substring(end);
-    onChange(newValue);
-
-    setTimeout(() => {
-      textarea.focus();
-      const newCursorPos = start + text.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-    }, 0);
-  }, [value, onChange]);
+  const handleLatexInsert = useCallback((latex: string) => {
+    editorRef.current?.focus();
+    const html = renderLatexInText(latex);
+    document.execCommand('insertHTML', false, html);
+    handleInput();
+  }, [handleInput]);
 
   // 切换到编辑模式
-  const handleFocus = () => {
+  const enterEditMode = useCallback(() => {
     setIsEditing(true);
-    setSelectedImageIndex(null);
-  };
+  }, []);
 
-  // 失焦时切换到预览模式
-  const handleBlur = () => {
-    setTimeout(() => {
-      if (containerRef.current?.contains(document.activeElement)) {
-        return;
+  // 离开编辑模式
+  const leaveEditMode = useCallback(() => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const markdown = htmlToMarkdown(html);
+      onChange(markdown);
+    }
+    setIsEditing(false);
+  }, [onChange]);
+
+  // 点击编辑器
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+
+    // 如果点击的是图片，不进入编辑模式
+    if (target.tagName === 'IMG') {
+      const rect = target.getBoundingClientRect();
+      // 如果点击的是左侧调整区域，让拖动处理
+      if (e.clientX - rect.left >= 20) {
+        enterEditMode();
       }
-      setIsEditing(false);
-      setSelectedImageIndex(null);
-    }, 150);
-  };
+      return;
+    }
 
-  // 预览模式：混合渲染文本和图片
+    // 如果还没进入编辑模式，进入
+    if (!isEditing) {
+      enterEditMode();
+    }
+  }, [isEditing, enterEditMode]);
+
+  // 预览模式渲染
   const renderPreview = () => {
     if (!value) {
       return <span className="text-gray-400 text-sm">{placeholder}</span>;
     }
 
-    const parts: React.ReactNode[] = [];
-    const images = parseImages(value);
+    const html = markdownToHtml(value, baseUrl);
 
-    if (images.length === 0) {
-      // 没有图片，只渲染文本
-      const htmlContent = renderLatexToHtml(value);
-      return <span dangerouslySetInnerHTML={{ __html: htmlContent }} className="question-text" />;
-    }
-
-    // 分割文本，插入图片
-    let lastIndex = 0;
-    const regex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
-
-    images.forEach((img, idx) => {
-      const match = value.indexOf(img.fullMatch, lastIndex);
-      if (match > lastIndex) {
-        const textBefore = value.substring(lastIndex, match);
-        const htmlBefore = renderLatexToHtml(textBefore);
-        parts.push(
-          <span key={`text-${idx}`} dangerouslySetInnerHTML={{ __html: htmlBefore }} className="question-text" />
-        );
-      }
-
-      // 图片
-      const imgWidth = img.width || 200;
-      const imgHeight = img.height;
-      const aspectRatio = imgHeight && imgWidth ? imgHeight / imgWidth : 0.75;
-      const displayHeight = Math.round(imgWidth * aspectRatio);
-
-      parts.push(
-        <InlineResizableImage
-          key={`img-${idx}`}
-          src={getImageUrl(img.url)}
-          alt={img.alt}
-          width={imgWidth}
-          height={imgHeight}
-          isSelected={selectedImageIndex === idx}
-          onSelect={() => {
-            setSelectedImageIndex(idx);
-            setIsEditing(true);
-          }}
-          onResize={(newWidth) => handleImageResize(idx, newWidth)}
-        />
-      );
-
-      lastIndex = match + img.fullMatch.length;
-    });
-
-    // 剩余文本
-    if (lastIndex < value.length) {
-      const remaining = value.substring(lastIndex);
-      const htmlRemaining = renderLatexToHtml(remaining);
-      parts.push(
-        <span key="text-end" dangerouslySetInnerHTML={{ __html: htmlRemaining }} className="question-text" />
-      );
-    }
-
-    return <>{parts}</>;
+    return <span dangerouslySetInnerHTML={{ __html: html }} />;
   };
 
   return (
-    <div ref={containerRef} className={`border rounded-lg overflow-hidden ${className}`}>
+    <div className={`border rounded-lg overflow-hidden ${className}`}>
       {isEditing ? (
         <>
-          <LatexToolbar onInsert={handleInsert} />
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onFocus={handleFocus}
-            onBlur={handleBlur}
-            rows={rows}
-            className="w-full px-3 py-2 border-0 focus:outline-none focus:ring-0 resize-y font-mono text-sm"
-            placeholder={placeholder}
+          <LatexToolbar onInsert={handleInsert} onLatexInsert={handleLatexInsert} />
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleInput}
+            onPaste={handlePaste}
+            onBlur={leaveEditMode}
+            onClick={handleClick}
+            onMouseDown={handleMouseDown}
+            className="min-h-[150px] px-3 py-2 focus:outline-none leading-relaxed"
+            style={{ whiteSpace: 'pre-wrap' }}
           />
           <div className="border-t px-3 py-2 bg-gray-50 text-xs text-gray-500">
-            点击图片选中，拖动左侧手柄调整大小
+            提示：输入 markdown 语法如 ![alt](url =WxH=) 插入图片，点击图片拖动左侧边缘调整大小
           </div>
         </>
       ) : (
         <div
-          onClick={() => {
-            setIsEditing(true);
-            setTimeout(() => textareaRef.current?.focus(), 0);
-          }}
-          className="min-h-[100px] px-3 py-2 cursor-text"
+          onClick={handleClick}
+          className="min-h-[100px] px-3 py-2 cursor-text leading-relaxed"
         >
           {renderPreview()}
         </div>
