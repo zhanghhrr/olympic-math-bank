@@ -7,26 +7,46 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path: pathParts } = await params;
+  const filename = pathParts[pathParts.length - 1];
 
-  // 拼接图片路径：uploads/ocr/{path}
-  const imagePath = path.join(process.cwd(), 'uploads', 'ocr', ...pathParts);
+  // 搜索 uploads/ocr 下所有包含此文件的目录
+  const uploadsDir = path.join(process.cwd(), 'uploads', 'ocr');
 
-  // 安全检查：确保路径在 uploads 目录下
-  const uploadsDir = path.join(process.cwd(), 'uploads');
-  if (!imagePath.startsWith(uploadsDir)) {
-    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  function findFile(dir: string, filename: string): string | null {
+    if (!fs.existsSync(dir)) return null;
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        // 如果是 images 子目录，在其中查找文件
+        if (entry.name === 'images') {
+          const imagesDir = fullPath;
+          const files = fs.readdirSync(imagesDir);
+          if (files.includes(filename)) {
+            return path.join(imagesDir, filename);
+          }
+        }
+        // 递归搜索子目录
+        const found = findFile(fullPath, filename);
+        if (found) return found;
+      }
+    }
+    return null;
   }
 
-  // 检查文件是否存在
-  if (!fs.existsSync(imagePath)) {
+  const filePath = findFile(uploadsDir, filename);
+
+  if (!filePath) {
     return NextResponse.json({ error: 'Image not found' }, { status: 404 });
   }
 
   // 读取文件
-  const fileBuffer = fs.readFileSync(imagePath);
+  const fileBuffer = fs.readFileSync(filePath);
 
   // 获取 MIME 类型
-  const ext = path.extname(imagePath).toLowerCase();
+  const ext = path.extname(filename).toLowerCase();
   const mimeTypes: Record<string, string> = {
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
