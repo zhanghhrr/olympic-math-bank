@@ -407,15 +407,31 @@ export function VisualLatexEditor({
 
   // 离开编辑模式
   const leaveEditMode = useCallback(() => {
-    setTimeout(() => {
-      if (!editorRef.current?.contains(document.activeElement)) {
-        const html = editorRef.current?.innerHTML || '';
-        const markdown = htmlToMarkdown(html);
-        onChange(markdown);
-        setIsEditing(false);
-      }
-    }, 100);
+    const html = editorRef.current?.innerHTML || '';
+    const markdown = htmlToMarkdown(html);
+    onChange(markdown);
+    setIsEditing(false);
   }, [onChange]);
+
+  // 点击外部离开编辑模式
+  useEffect(() => {
+    if (!isEditing) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!editorRef.current) return;
+      const target = e.target as HTMLElement;
+      // 检查点击是否在编辑器外部
+      if (!editorRef.current.contains(target)) {
+        // 点击外部，保存并离开编辑模式
+        leaveEditMode();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isEditing, leaveEditMode]);
 
   // 双击预览
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -446,7 +462,6 @@ export function VisualLatexEditor({
             contentEditable
             onInput={handleInput}
             onPaste={handlePaste}
-            onBlur={leaveEditMode}
             onMouseDown={handleMouseDown}
             onDoubleClick={handleDoubleClick}
             className="min-h-[150px] px-3 py-2 focus:outline-none leading-relaxed text-sm"
