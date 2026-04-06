@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import katex from 'katex';
 import { GripVertical } from 'lucide-react';
 import { LatexToolbar } from './LatexToolbar';
@@ -49,50 +49,71 @@ function renderLatexToHtml(text: string): string {
   return text;
 }
 
-// 解析 HTML 内容中的图片，提取尺寸信息
-function parseImagesFromHtml(html: string): { url: string; width: number; height: number }[] {
-  const images: { url: string; width: number; height: number }[] = [];
-  const regex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+// 解析 markdown 图片语法，提取尺寸信息
+interface ImageInfo {
+  fullMatch: string;
+  alt: string;
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+function parseImages(text: string): ImageInfo[] {
+  const images: ImageInfo[] = [];
+  // 匹配：![alt](url =WxH=) 或 ![alt](url)
+  const regex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
   let match;
-  while ((match = regex.exec(html)) !== null) {
-    const srcMatch = match[0].match(/src=["']([^"']+)["']/);
-    const widthMatch = match[0].match(/data-width=["']([^"']+)["']/);
-    const heightMatch = match[0].match(/data-height=["']([^"']+)["']/);
-    if (srcMatch) {
-      images.push({
-        url: srcMatch[1],
-        width: widthMatch ? parseInt(widthMatch[1]) : 200,
-        height: heightMatch ? parseInt(heightMatch[1]) : 150,
-      });
-    }
+  while ((match = regex.exec(text)) !== null) {
+    images.push({
+      fullMatch: match[0],
+      alt: match[1],
+      url: match[2],
+      width: match[3] ? parseInt(match[3]) : undefined,
+      height: match[4] ? parseInt(match[4]) : undefined,
+    });
   }
   return images;
 }
 
-// 可拖动调整尺寸的图片组件
-interface ResizableImageProps {
+// 可调整尺寸的图片组件
+interface InlineResizableImageProps {
   src: string;
-  alt?: string;
-  initialWidth?: number;
-  initialHeight?: number;
-  onResize: (width: number, height: number) => void;
+  alt: string;
+  width: number;
+  height?: number;
+  isSelected: boolean;
+  onSelect: () => void;
+  onResize: (newWidth: number, newHeight?: number) => void;
 }
 
-function ResizableImage({ src, alt = '', initialWidth = 200, initialHeight = 150, onResize }: ResizableImageProps) {
-  const [width, setWidth] = useState(initialWidth);
-  const [height, setHeight] = useState(initialHeight);
+function InlineResizableImage({
+  src,
+  alt,
+  width,
+  height,
+  isSelected,
+  onSelect,
+  onResize,
+}: InlineResizableImageProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [currentWidth, setCurrentWidth] = useState(width);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
-  const aspectRatio = initialHeight / initialWidth;
+  const aspectRatio = height && width ? height / width : 0.75;
+
+  // 同步外部宽度变化
+  useEffect(() => {
+    setCurrentWidth(width);
+  }, [width]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(true);
     startXRef.current = e.clientX;
-    startWidthRef.current = width;
-  }, [width]);
+    startWidthRef.current = currentWidth;
+    onSelect();
+  }, [currentWidth, onSelect]);
 
   useEffect(() => {
     if (!isDragging) return;
@@ -100,13 +121,14 @@ function ResizableImage({ src, alt = '', initialWidth = 200, initialHeight = 150
     const handleMouseMove = (e: MouseEvent) => {
       const delta = e.clientX - startXRef.current;
       const newWidth = Math.max(50, Math.min(800, startWidthRef.current + delta));
-      setWidth(newWidth);
-      setHeight(Math.round(newWidth * aspectRatio));
+      setCurrentWidth(newWidth);
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
-      onResize(width, height);
+      if (currentWidth !== startWidthRef.current) {
+        onResize(currentWidth);
+      }
     };
 
     document.addEventListener('mousemove', handleMouseMove);
@@ -116,40 +138,43 @@ function ResizableImage({ src, alt = '', initialWidth = 200, initialHeight = 150
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, width, height, aspectRatio, onResize]);
+  }, [isDragging, currentWidth, onResize]);
+
+  const displayHeight = Math.round(currentWidth * aspectRatio);
 
   return (
     <span
-      className="relative inline-block align-middle"
-      style={{ width, height }}
-      contentEditable={false}
-      data-image-src={src}
-      data-width={width}
-      data-height={height}
+      className={`relative inline-block align-middle mx-1 group ${isSelected ? 'ring-2 ring-blue-500 rounded' : ''}`}
+      style={{ width: currentWidth, height: displayHeight }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
     >
       <img
         src={src}
         alt={alt}
-        className="w-full h-full object-contain border border-gray-300 rounded"
+        className="w-full h-full object-contain rounded"
         draggable={false}
       />
-      {/* 左侧拖动手柄 */}
+      {/* 左侧拖动手柄 - 始终显示 */}
       <span
-        className={`absolute left-0 top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center bg-gray-100 hover:bg-gray-200 rounded-l border-r border-gray-300 ${
-          isDragging ? 'bg-blue-200 border-blue-400' : ''
+        className={`absolute left-0 top-0 bottom-0 w-5 cursor-ew-resize flex items-center justify-center rounded-l transition-colors ${
+          isDragging
+            ? 'bg-blue-400'
+            : 'bg-gray-200/80 hover:bg-blue-300 opacity-0 group-hover:opacity-100'
         }`}
+        style={{ top: '50%', transform: 'translateY(-50%)', height: '24px', marginTop: 0 }}
         onMouseDown={handleMouseDown}
       >
-        <GripVertical className="w-3 h-3 text-gray-500" />
+        <GripVertical className="w-3 h-3 text-gray-600" />
       </span>
       {/* 宽度提示 */}
-      <span
-        className={`absolute -bottom-5 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-1 rounded ${
-          isDragging ? 'opacity-100' : 'opacity-0'
-        } transition-opacity`}
-      >
-        {width}px
-      </span>
+      {isDragging && (
+        <span className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">
+          {currentWidth}px
+        </span>
+      )}
     </span>
   );
 }
@@ -170,185 +195,115 @@ export function VisualLatexEditor({
   className = '',
 }: VisualLatexEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
+  const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const { getImageUrl } = useImageUrl();
 
-  // 初始化编辑器内容
-  useEffect(() => {
-    if (editorRef.current && isEditing) {
-      // 解析内容，将 markdown 图片转换为可编辑的 HTML
-      const html = parseContentToHtml(value, getImageUrl);
-      if (editorRef.current.innerHTML !== html) {
-        editorRef.current.innerHTML = html;
-      }
-    }
-  }, [isEditing, value, getImageUrl]);
+  // 解析图片
+  const images = useMemo(() => parseImages(value), [value]);
 
-  // 将 markdown 内容转换为 HTML
-  const parseContentToHtml = (content: string, getImageUrlFn: (path: string) => string): string => {
-    if (!content) return '';
+  // 处理图片尺寸调整
+  const handleImageResize = useCallback((index: number, newWidth: number) => {
+    const img = images[index];
+    if (!img) return;
 
-    // 先渲染 LaTeX
-    let html = renderLatexToHtml(content);
+    const aspectRatio = img.height && img.width ? img.height / img.width : 0.75;
+    const newHeight = Math.round(newWidth * aspectRatio);
 
-    // 替换图片语法为 HTML img 标签
-    // 格式：![alt](url =WxH=) 或 ![alt](url)
-    html = html.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g, (_, alt, url, w, h) => {
-      const width = w || 200;
-      const height = h ? `data-height="${h}"` : '';
-      return `<img src="${getImageUrlFn(url)}" alt="${alt}" data-width="${width}" ${height} style="width:${width}px;height:auto;" />`;
-    });
-
-    return html;
-  };
-
-  // 处理图片尺寸变化
-  const handleImageResize = useCallback((imgElement: HTMLImageElement, newWidth: number, newHeight: number) => {
-    imgElement.setAttribute('data-width', String(newWidth));
-    imgElement.setAttribute('data-height', String(newHeight));
-    imgElement.style.width = `${newWidth}px`;
-    imgElement.style.height = 'auto';
-
-    // 通知内容变化
-    triggerChange();
-  }, []);
-
-  // 触发内容变化
-  const triggerChange = useCallback(() => {
-    if (!editorRef.current) return;
-
-    // 将 HTML 内容转回 markdown 格式
-    const html = editorRef.current.innerHTML;
-    const markdown = htmlToMarkdown(html);
-    onChange(markdown);
-  }, [onChange]);
-
-  // 将 HTML 转回带尺寸信息的 markdown
-  const htmlToMarkdown = (html: string): string => {
-    // 替换 img 标签为带尺寸的 markdown 图片语法
-    return html.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, (match) => {
-      const srcMatch = match.match(/src=["']([^"']+)["']/);
-      const altMatch = match.match(/alt=["']([^"']+)["']/);
-      const widthMatch = match.match(/data-width=["']([^"']+)["']/);
-      const heightMatch = match.match(/data-height=["']([^"']+)["']/);
-
-      if (!srcMatch) return match;
-
-      const url = srcMatch[1];
-      const alt = altMatch ? altMatch[1] : '';
-      const width = widthMatch ? widthMatch[1] : '';
-      const height = heightMatch ? heightMatch[1] : '';
-
-      // 移除 API 前缀获取原始路径
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3001';
-      let cleanUrl = url;
-      if (url.startsWith(baseUrl)) {
-        cleanUrl = url.substring(baseUrl.length);
-        if (cleanUrl.startsWith('/api/images/')) {
-          cleanUrl = cleanUrl.substring('/api/images/'.length);
-        }
-      }
-
-      if (width && height) {
-        return `![${alt}](${cleanUrl} =${width}x${height}=)`;
-      }
-      return `![${alt}](${cleanUrl})`;
-    });
-  };
+    // 更新 markdown 语法中的尺寸
+    const newImageMarkdown = `![${img.alt}](${img.url} =${newWidth}x${newHeight}=)`;
+    const newValue = value.replace(img.fullMatch, newImageMarkdown);
+    onChange(newValue);
+  }, [images, value, onChange]);
 
   // 处理工具栏插入
   const handleInsert = useCallback((text: string) => {
-    if (!editorRef.current) return;
+    const textarea = textareaRef.current;
+    if (!textarea) return;
 
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      // 如果没有选区，在末尾插入
-      editorRef.current.innerHTML += text;
-    } else {
-      // 在选区位置插入
-      const range = selection.getRangeAt(0);
-      const textNode = document.createTextNode(text);
-      range.insertNode(textNode);
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newValue = value.substring(0, start) + text + value.substring(end);
+    onChange(newValue);
 
-      // 移动光标到插入内容之后
-      range.setStartAfter(textNode);
-      range.setEndAfter(textNode);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
-
-    triggerChange();
-  }, [triggerChange]);
-
-  // 处理粘贴
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
-  }, []);
-
-  // 点击进入编辑模式
-  const handleClick = useCallback(() => {
-    if (!isEditing) {
-      setIsEditing(true);
-    }
-  }, [isEditing]);
-
-  // 失焦时保存内容
-  const handleBlur = useCallback(() => {
     setTimeout(() => {
-      if (editorRef.current && document.activeElement !== editorRef.current) {
-        // 确保内容已保存
-        triggerChange();
-        setIsEditing(false);
-      }
-    }, 200);
-  }, [triggerChange]);
+      textarea.focus();
+      const newCursorPos = start + text.length;
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+    }, 0);
+  }, [value, onChange]);
 
-  // 预览模式渲染
+  // 切换到编辑模式
+  const handleFocus = () => {
+    setIsEditing(true);
+    setSelectedImageIndex(null);
+  };
+
+  // 失焦时切换到预览模式
+  const handleBlur = () => {
+    setTimeout(() => {
+      if (containerRef.current?.contains(document.activeElement)) {
+        return;
+      }
+      setIsEditing(false);
+      setSelectedImageIndex(null);
+    }, 150);
+  };
+
+  // 预览模式：混合渲染文本和图片
   const renderPreview = () => {
     if (!value) {
       return <span className="text-gray-400 text-sm">{placeholder}</span>;
     }
 
-    // 解析 markdown 内容
     const parts: React.ReactNode[] = [];
-    const regex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
+    const images = parseImages(value);
+
+    if (images.length === 0) {
+      // 没有图片，只渲染文本
+      const htmlContent = renderLatexToHtml(value);
+      return <span dangerouslySetInnerHTML={{ __html: htmlContent }} className="question-text" />;
+    }
+
+    // 分割文本，插入图片
     let lastIndex = 0;
-    let match;
+    const regex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
 
-    const htmlContent = renderLatexToHtml(value);
-
-    while ((match = regex.exec(value)) !== null) {
-      // 文本部分
-      if (match.index > lastIndex) {
-        const textBefore = value.substring(lastIndex, match.index);
+    images.forEach((img, idx) => {
+      const match = value.indexOf(img.fullMatch, lastIndex);
+      if (match > lastIndex) {
+        const textBefore = value.substring(lastIndex, match);
         const htmlBefore = renderLatexToHtml(textBefore);
         parts.push(
-          <span key={`text-${lastIndex}`} dangerouslySetInnerHTML={{ __html: htmlBefore }} className="question-text" />
+          <span key={`text-${idx}`} dangerouslySetInnerHTML={{ __html: htmlBefore }} className="question-text" />
         );
       }
 
-      // 图片部分
-      const alt = match[1];
-      const url = match[2];
-      const width = match[3] ? parseInt(match[3]) : 200;
-      const height = match[4] ? parseInt(match[4]) : undefined;
+      // 图片
+      const imgWidth = img.width || 200;
+      const imgHeight = img.height;
+      const aspectRatio = imgHeight && imgWidth ? imgHeight / imgWidth : 0.75;
+      const displayHeight = Math.round(imgWidth * aspectRatio);
 
       parts.push(
-        <img
-          key={`img-${match.index}`}
-          src={getImageUrl(url)}
-          alt={alt}
-          width={width}
-          height={height}
-          style={width ? { width, height: height || 'auto' } : undefined}
-          className="inline-block max-w-full h-auto align-middle mx-1 border border-gray-200 rounded"
+        <InlineResizableImage
+          key={`img-${idx}`}
+          src={getImageUrl(img.url)}
+          alt={img.alt}
+          width={imgWidth}
+          height={imgHeight}
+          isSelected={selectedImageIndex === idx}
+          onSelect={() => {
+            setSelectedImageIndex(idx);
+            setIsEditing(true);
+          }}
+          onResize={(newWidth) => handleImageResize(idx, newWidth)}
         />
       );
 
-      lastIndex = match.index + match[0].length;
-    }
+      lastIndex = match + img.fullMatch.length;
+    });
 
     // 剩余文本
     if (lastIndex < value.length) {
@@ -363,27 +318,30 @@ export function VisualLatexEditor({
   };
 
   return (
-    <div className={`border rounded-lg overflow-hidden ${className}`}>
+    <div ref={containerRef} className={`border rounded-lg overflow-hidden ${className}`}>
       {isEditing ? (
         <>
           <LatexToolbar onInsert={handleInsert} />
-          <div
-            ref={editorRef}
-            contentEditable
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={handleFocus}
             onBlur={handleBlur}
-            onPaste={handlePaste}
-            onInput={triggerChange}
-            className="min-h-[100px] px-3 py-2 focus:outline-none prose prose-sm max-w-none"
-            style={{ whiteSpace: 'pre-wrap' }}
-            spellCheck={false}
+            rows={rows}
+            className="w-full px-3 py-2 border-0 focus:outline-none focus:ring-0 resize-y font-mono text-sm"
+            placeholder={placeholder}
           />
           <div className="border-t px-3 py-2 bg-gray-50 text-xs text-gray-500">
-            提示：拖动图片左侧手柄可调整大小
+            点击图片选中，拖动左侧手柄调整大小
           </div>
         </>
       ) : (
         <div
-          onClick={handleClick}
+          onClick={() => {
+            setIsEditing(true);
+            setTimeout(() => textareaRef.current?.focus(), 0);
+          }}
           className="min-h-[100px] px-3 py-2 cursor-text"
         >
           {renderPreview()}
