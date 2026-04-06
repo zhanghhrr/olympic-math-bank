@@ -123,8 +123,9 @@ function markdownToEditHtml(text: string, baseUrl: string): string {
 function htmlToMarkdown(html: string): string {
   let text = html;
 
-  // 提取图片信息 - 处理被 span.image-container 包裹的图片
-  text = text.replace(/<span class="image-container"[^>]*>[\s\S]*?<img[^>]+class="(?:preview-image|edit-image)"[^>]*>[\s\S]*?<\/span>/gi, (match) => {
+  // 提取图片信息 - 只处理裸露的图片（不在 span.image-container 内的）
+  // 先移除已处理的 image-container
+  text = text.replace(/<span class="image-container"[^>]*>[\s\S]*?<\/span>/gi, (match) => {
     const urlMatch = match.match(/data-url="([^"]+)"/);
     const widthMatch = match.match(/data-width="([^"]+)"/);
     const heightMatch = match.match(/data-height="([^"]+)"/);
@@ -142,7 +143,7 @@ function htmlToMarkdown(html: string): string {
     return `![${alt}](${urlMatch[1]})`;
   });
 
-  // 也处理裸露的图片
+  // 处理裸露的图片
   text = text.replace(/<img[^>]+class="(?:preview-image|edit-image)"[^>]*>/gi, (match) => {
     const urlMatch = match.match(/data-url="([^"]+)"/);
     const widthMatch = match.match(/data-width="([^"]+)"/);
@@ -196,6 +197,7 @@ export function VisualLatexEditor({
   const [showResizeHint, setShowResizeHint] = useState<{ x: number; y: number; width: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+  const isSettingContentRef = useRef(false); // 标记是否正在程序化设置内容
 
   // 拖动状态
   const dragRef = useRef<{
@@ -209,15 +211,22 @@ export function VisualLatexEditor({
   // 初始化编辑器内容
   useEffect(() => {
     if (isEditing && editorRef.current) {
+      isSettingContentRef.current = true;
       const editHtml = markdownToEditHtml(value, baseUrl);
       if (editorRef.current.innerHTML !== editHtml) {
         editorRef.current.innerHTML = editHtml;
       }
+      // 短暂延迟后重置标记
+      setTimeout(() => {
+        isSettingContentRef.current = false;
+      }, 0);
     }
   }, [isEditing, value, baseUrl]);
 
   // 处理输入
   const handleInput = useCallback(() => {
+    // 如果是程序化设置内容，跳过
+    if (isSettingContentRef.current) return;
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
     const markdown = htmlToMarkdown(html);
