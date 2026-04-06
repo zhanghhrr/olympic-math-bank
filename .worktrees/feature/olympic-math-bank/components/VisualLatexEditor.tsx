@@ -59,6 +59,11 @@ function renderLatexToHtml(latex: string, displayMode: boolean): string {
 function markdownToPreviewHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
+  // 如果内容已经包含 preview-image 或 katex 类名，说明是已处理过的，跳过
+  if (text.includes('class="preview-image"') || text.includes('class="katex')) {
+    return text;
+  }
+
   let result = text;
 
   // 先处理图片
