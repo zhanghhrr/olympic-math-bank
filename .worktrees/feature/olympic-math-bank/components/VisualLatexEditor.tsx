@@ -74,11 +74,23 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
     return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${h || ''}" data-original="${match}" data-has-size="${hasSize}" class="preview-image" style="${sizeStyle}display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;" />`;
   });
 
-  // 处理 LaTeX 公式
-  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => renderLatexToHtml(latex, true));
-  result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => renderLatexToHtml(latex, true));
-  result = result.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => renderLatexToHtml(latex, false));
-  result = result.replace(/\$([^$\n]+?)\$/g, (_, latex) => renderLatexToHtml(latex, false));
+  // 处理 LaTeX 公式 - 保留原始 LaTeX 到 data-latex 属性
+  result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
+    const html = renderLatexToHtml(latex, true);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="$$${latex}$$"`);
+  });
+  result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
+    const html = renderLatexToHtml(latex, true);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="\\[${latex}\\]"`);
+  });
+  result = result.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
+    const html = renderLatexToHtml(latex, false);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="\\(${latex}\\)"`);
+  });
+  result = result.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
+    const html = renderLatexToHtml(latex, false);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="$${latex}$"`);
+  });
 
   return result;
 }
@@ -162,18 +174,21 @@ function htmlToMarkdown(html: string): string {
     return `![${alt}](${urlMatch[1]})`;
   });
 
-  // 提取 LaTeX 源码 - 使用 data-latex 属性，如果没有则使用 span 的文本内容
-  text = text.replace(/<span class="latex-source"[^>]*>([\s\S]*?)<\/span>/gi, (match, content) => {
-    // 尝试从 data-latex 属性获取
-    const dataLatexMatch = match.match(/data-latex="([^"]+)"/);
-    if (dataLatexMatch) {
-      return dataLatexMatch[1];
-    }
-    // 如果没有 data-latex，返回原始文本内容
+  // 提取 LaTeX 源码 - 处理 latex-source 和 katex 类，使用 data-latex 属性恢复原文
+  // 匹配整个 katex 元素（从开标签到闭标签）
+  text = text.replace(/<span class="katex"[^>]*data-latex="([^"]+)"[^>]*>[\s\S]*?<\/span>/gi, (_, latex) => {
+    return latex;
+  });
+  // 处理 latex-source span
+  text = text.replace(/<span class="latex-source"[^>]*data-latex="([^"]+)"[^>]*>/gi, (_, latex) => {
+    return latex;
+  });
+  text = text.replace(/<span class="latex-source"[^>]*>([\s\S]*?)<\/span>/gi, (_, content) => {
     return content;
   });
 
-  // 清理其他标签
+  // 清理其他 katex 元素（没有 data-latex 属性的旧版内容）- 移除整个元素
+  text = text.replace(/<span class="katex"[^>]*>[\s\S]*?<\/span>/gi, '');
   text = text.replace(/<[^>]+>/g, '');
   text = text.replace(/&nbsp;/g, ' ');
   text = text.replace(/&lt;/g, '<');
