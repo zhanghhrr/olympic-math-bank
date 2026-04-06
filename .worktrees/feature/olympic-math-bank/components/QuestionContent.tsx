@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import katex from 'katex';
 import { useImageUrl } from '@/hooks/useImageUrl';
 import { ImageModal } from './ImageModal';
@@ -32,21 +32,21 @@ function renderLatexToHtml(text: string): string {
     }
   });
 
+  // 行内公式：\(...\)，注意 \) 是转义的右括号
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
+    try {
+      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
+    } catch {
+      return `\\(${latex}\\)`;
+    }
+  });
+
   // 行内公式：$...$
   text = text.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
     try {
       return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
     } catch {
       return `$${latex}$`;
-    }
-  });
-
-  // 行内公式：\(...\)
-  text = text.replace(/\\\(([^)]+?)\\\)/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-    } catch {
-      return `\\(${latex}\\)`;
     }
   });
 
