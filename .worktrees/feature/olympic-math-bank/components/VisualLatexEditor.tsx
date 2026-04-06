@@ -110,6 +110,11 @@ function autoWrapLatex(text: string): string {
 function markdownToPreviewHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
+  // 如果内容已经包含 katex 类，说明已处理过，跳过
+  if (text.includes('class="katex"')) {
+    return text;
+  }
+
   let result = text;
 
   // 先处理图片
@@ -149,6 +154,11 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
 // 将 markdown 内容转换为编辑 HTML
 function markdownToEditHtml(text: string, baseUrl: string): string {
   if (!text) return '';
+
+  // 如果内容已经包含 latex-source 或 image-container 或 katex，说明是已处理过的，跳过
+  if (text.includes('class="latex-source"') || text.includes('class="image-container"') || text.includes('class="katex"')) {
+    return text;
+  }
 
   let result = text;
 
