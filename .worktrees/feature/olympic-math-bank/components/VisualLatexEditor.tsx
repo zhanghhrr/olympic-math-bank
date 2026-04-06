@@ -234,7 +234,12 @@ export function VisualLatexEditor({
 
       const deltaX = e.clientX - dragRef.current.startX;
       const newWidth = Math.max(50, Math.min(800, dragRef.current.startWidth + deltaX));
-      const newHeight = Math.round(newWidth * dragRef.current.aspectRatio);
+      let newHeight = Math.round(newWidth * dragRef.current.aspectRatio);
+
+      // 如果 aspectRatio 无效，使用原始高度比例
+      if (!dragRef.current.aspectRatio || isNaN(dragRef.current.aspectRatio)) {
+        newHeight = Math.round(newWidth * 0.75); // 默认 4:3 比例
+      }
 
       const img = dragRef.current.target;
       const container = img.parentElement;
@@ -308,8 +313,19 @@ export function VisualLatexEditor({
         e.preventDefault();
         e.stopPropagation();
 
-        const width = parseInt(img.getAttribute('data-width') || '200');
-        const height = parseInt(img.getAttribute('data-height') || '150');
+        // 使用 data 属性中的值，如果为空则使用实际渲染的尺寸
+        const dataWidth = img.getAttribute('data-width');
+        const dataHeight = img.getAttribute('data-height');
+        const container = img.parentElement;
+        const containerRect = container?.getBoundingClientRect();
+
+        let width = dataWidth ? parseInt(dataWidth) : Math.round(containerRect?.width || 200);
+        let height = dataHeight ? parseInt(dataHeight) : Math.round(containerRect?.height || 150);
+
+        // 如果宽高仍为0或NaN，使用默认值
+        if (!width || width < 1) width = 200;
+        if (!height || height < 1) height = 150;
+
         const aspectRatio = height / width;
 
         dragRef.current = {
