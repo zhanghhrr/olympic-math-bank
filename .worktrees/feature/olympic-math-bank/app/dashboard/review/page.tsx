@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, XCircle, Eye, Filter } from 'lucide-react';
+import { QuestionContent } from '@/components/QuestionContent';
 
 interface Question {
   id: string;
@@ -177,24 +178,18 @@ export default function ReviewPage() {
 
               <div className="mb-4">
                 <h3 className="font-medium mb-2">题目内容：</h3>
-                <div className="bg-slate-50 p-4 rounded-lg whitespace-pre-wrap">
-                  {q.content}
-                </div>
+                <QuestionContent content={q.content} className="bg-slate-50 p-4 rounded-lg" />
               </div>
 
               <div className="mb-4">
                 <h3 className="font-medium mb-2">答案：</h3>
-                <div className="bg-slate-50 p-4 rounded-lg">
-                  {q.answer}
-                </div>
+                <QuestionContent content={q.answer} className="bg-slate-50 p-4 rounded-lg" />
               </div>
 
               {q.solution && (
                 <div className="mb-4">
                   <h3 className="font-medium mb-2">详细解答：</h3>
-                  <div className="bg-slate-50 p-4 rounded-lg whitespace-pre-wrap">
-                    {q.solution}
-                  </div>
+                  <QuestionContent content={q.solution} className="bg-slate-50 p-4 rounded-lg" />
                 </div>
               )}
 
