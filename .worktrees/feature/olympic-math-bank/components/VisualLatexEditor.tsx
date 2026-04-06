@@ -235,8 +235,11 @@ export function VisualLatexEditor({
     if (!editorRef.current) return;
     const html = editorRef.current.innerHTML;
     const markdown = htmlToMarkdown(html);
-    onChange(markdown);
-  }, [onChange]);
+    // 只在内容变化时触发 onChange
+    if (markdown !== value) {
+      onChange(markdown);
+    }
+  }, [onChange, value]);
 
   // 鼠标移动 - 用于拖动和显示提示
   const handleMouseMove = useCallback((e: MouseEvent) => {
