@@ -125,22 +125,22 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
     return `<img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${h || ''}" data-original="${match}" data-has-size="${hasSize}" class="preview-image" style="${sizeStyle}display:inline;vertical-align:middle;margin:4px;border:1px solid #e5e7eb;border-radius:4px;" />`;
   });
 
-  // 处理 LaTeX 公式 - 保留原始 LaTeX 到 data-latex 属性
+  // 处理 LaTeX 公式 - 保留原始 LaTeX 到 data-latex 属性（不包含$符号）
   result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
     const html = renderLatexToHtml(latex, true);
-    return html.replace('<span class="katex"', `<span class="katex" data-latex="$$${latex}$$"`);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="${latex}" data-mode="display"`);
   });
   result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
     const html = renderLatexToHtml(latex, true);
-    return html.replace('<span class="katex"', `<span class="katex" data-latex="\\[${latex}\\]"`);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="${latex}" data-mode="display"`);
   });
   result = result.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
     const html = renderLatexToHtml(latex, false);
-    return html.replace('<span class="katex"', `<span class="katex" data-latex="\\(${latex}\\)"`);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="${latex}" data-mode="inline"`);
   });
   result = result.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
     const html = renderLatexToHtml(latex, false);
-    return html.replace('<span class="katex"', `<span class="katex" data-latex="$${latex}$"`);
+    return html.replace('<span class="katex"', `<span class="katex" data-latex="${latex}" data-mode="inline"`);
   });
 
   return result;
@@ -165,18 +165,18 @@ function markdownToEditHtml(text: string, baseUrl: string): string {
     return `<span class="image-container" style="position:relative;display:inline-block;${sizeStyle}vertical-align:middle;margin:4px;"><img src="${imgUrl}" alt="${alt}" data-url="${url}" data-width="${width}" data-height="${h || ''}" data-original="${match}" data-has-size="${hasSize}" class="edit-image" style="${sizeStyle}display:block;border:1px solid #e5e7eb;border-radius:4px;pointer-events:none;" /><span class="resize-handle" style="position:absolute;bottom:0;right:0;width:24px;height:24px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;color:white;opacity:0.8;pointer-events:none;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>`;
   });
 
-  // 处理 LaTeX 公式 - 显示源码
+  // 处理 LaTeX 公式 - 显示源码（data-latex 不包含$符号）
   result = result.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="$$${latex}$$" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">$$${latex}$$</span>`;
+    return `<span class="latex-source" data-latex="${latex}" data-mode="display" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">$$${latex}$$</span>`;
   });
   result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="\\[${latex}\\]" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">\\[${latex}\\]</span>`;
+    return `<span class="latex-source" data-latex="${latex}" data-mode="display" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">\\[${latex}\\]</span>`;
   });
   result = result.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="\\(${latex}\\)" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">\\(${latex}\\)</span>`;
+    return `<span class="latex-source" data-latex="${latex}" data-mode="inline" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">\\(${latex}\\)</span>`;
   });
   result = result.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
-    return `<span class="latex-source" data-latex="$${latex}$" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">$${latex}$</span>`;
+    return `<span class="latex-source" data-latex="${latex}" data-mode="inline" style="font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;">$${latex}$</span>`;
   });
 
   return result;
@@ -225,14 +225,14 @@ function htmlToMarkdown(html: string): string {
     return `![${alt}](${urlMatch[1]})`;
   });
 
-  // 提取 LaTeX 源码 - 处理 latex-source 和 katex 类，使用 data-latex 属性恢复原文
-  // 匹配整个 katex 元素（从开标签到闭标签）
-  text = text.replace(/<span class="katex"[^>]*data-latex="([^"]+)"[^>]*>[\s\S]*?<\/span>/gi, (_, latex) => {
-    return latex;
+  // 提取 LaTeX 源码 - 处理 latex-source 和 katex 类
+  // katex 元素：根据 data-mode 使用正确的分隔符
+  text = text.replace(/<span class="katex"[^>]*data-latex="([^"]*)"[^>]*data-mode="([^"]*)"[^>]*>[\s\S]*?<\/span>/gi, (_, latex, mode) => {
+    return mode === 'display' ? `$$${latex}$$` : `$${latex}$`;
   });
-  // 处理 latex-source span
-  text = text.replace(/<span class="latex-source"[^>]*data-latex="([^"]+)"[^>]*>/gi, (_, latex) => {
-    return latex;
+  // 处理 latex-source span - 根据 data-mode 使用正确的分隔符
+  text = text.replace(/<span class="latex-source"[^>]*data-latex="([^"]*)"[^>]*data-mode="([^"]*)"[^>]*>/gi, (_, latex, mode) => {
+    return mode === 'display' ? `$$${latex}$$` : `$${latex}$`;
   });
   text = text.replace(/<span class="latex-source"[^>]*>([\s\S]*?)<\/span>/gi, (_, content) => {
     return content;
