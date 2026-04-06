@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { LatexToolbar } from './LatexToolbar';
 import { QuestionContent } from './QuestionContent';
+import { ResizableImage } from './ResizableImage';
+import { useImageUrl } from '@/hooks/useImageUrl';
 
 interface LatexEditorProps {
   value: string;
@@ -10,6 +12,17 @@ interface LatexEditorProps {
   placeholder?: string;
   rows?: number;
   className?: string;
+}
+
+// 从内容中解析出所有 markdown 图片
+function parseImages(content: string): { alt: string; url: string }[] {
+  const images: { alt: string; url: string }[] = [];
+  const regex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    images.push({ alt: match[1], url: match[2] });
+  }
+  return images;
 }
 
 export function LatexEditor({
@@ -21,6 +34,10 @@ export function LatexEditor({
 }: LatexEditorProps) {
   const [isEditing, setIsEditing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { getImageUrl } = useImageUrl();
+
+  // 解析内容中的图片
+  const images = useMemo(() => parseImages(value), [value]);
 
   const handleFocus = () => {
     setIsEditing(true);
@@ -67,6 +84,21 @@ export function LatexEditor({
             className="w-full px-3 py-2 border-0 focus:outline-none focus:ring-0 resize-y font-mono text-sm"
             placeholder={placeholder}
           />
+          {images.length > 0 && (
+            <div className="border-t p-3 bg-gray-50">
+              <p className="text-xs text-gray-500 mb-2">图片预览（可拖动调整尺寸）：</p>
+              <div className="flex flex-wrap gap-4">
+                {images.map((img, index) => (
+                  <EditableImage
+                    key={index}
+                    src={getImageUrl(img.url)}
+                    alt={img.alt}
+                    initialWidth={200}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </>
       ) : (
         <div
