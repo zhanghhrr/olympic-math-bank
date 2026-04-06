@@ -78,8 +78,9 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
     }
   });
 
-    // 处理图片
-    result = result.replace(imageRegex, (match, alt, url, w, h) => {
+  // 处理图片
+  const imageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+=([0-9]+)x([0-9]+)=)?\s*\)/g;
+  result = result.replace(imageRegex, (match, alt, url, w, h) => {
       const width = w || 200;
       const height = h || Math.round(width * 0.75);
       const imgUrl = getImageUrl(url, baseUrl);
