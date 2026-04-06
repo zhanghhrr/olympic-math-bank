@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous } from 'lucide-react';
+import { QuestionContent } from '@/components/QuestionContent';
 
 interface KnowledgeTagTreeNode {
   id: string;
@@ -239,9 +240,7 @@ function QuestionCard({ question }: { question: Question }) {
               <DifficultyStars level={question.difficulty} />
             </div>
 
-            <div className="text-gray-900 text-base leading-relaxed whitespace-pre-wrap">
-              {question.content}
-            </div>
+            <QuestionContent content={question.content} className="text-gray-900 text-base leading-relaxed" />
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -318,9 +317,7 @@ function QuestionCard({ question }: { question: Question }) {
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                 答案
               </h4>
-              <p className="text-gray-900 text-sm leading-relaxed whitespace-pre-wrap">
-                {question.answer || '暂无'}
-              </p>
+              <QuestionContent content={question.answer || ''} className="text-gray-900 text-sm leading-relaxed" />
             </div>
 
             <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -328,9 +325,7 @@ function QuestionCard({ question }: { question: Question }) {
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                 解析
               </h4>
-              <p className="text-gray-900 text-sm leading-relaxed whitespace-pre-wrap">
-                {question.solution || '暂无'}
-              </p>
+              <QuestionContent content={question.solution || ''} className="text-gray-900 text-sm leading-relaxed" />
             </div>
 
             {(question.source || question.competition || question.year) && (
