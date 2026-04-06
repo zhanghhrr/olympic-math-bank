@@ -55,6 +55,59 @@ function renderLatexToHtml(latex: string, displayMode: boolean): string {
   }
 }
 
+// 自动包装裸 LaTeX 表达式为 $...$ 格式
+// 排除：已包装的内容、图片语法、纯中文、纯数字
+function autoWrapLatex(text: string): string {
+  if (!text) return text;
+
+  // 临时替换已包装的 LaTeX 表达式，防止重复包装
+  const wrappedPatterns: string[] = [];
+  let result = text;
+
+  // 替换 $$...$$ 为占位符
+  result = result.replace(/\$\$[\s\S]*?\$\$/g, (match) => {
+    wrappedPatterns.push(match);
+    return `__WRAPPED_LATEX_${wrappedPatterns.length - 1}__`;
+  });
+
+  // 替换 $...$ 为占位符
+  result = result.replace(/\$[^$\n]+?\$/g, (match) => {
+    wrappedPatterns.push(match);
+    return `__WRAPPED_LATEX_${wrappedPatterns.length - 1}__`;
+  });
+
+  // 替换图片语法为占位符
+  result = result.replace(/!\[[^\]]*\]\([^)]+\)/g, (match) => {
+    wrappedPatterns.push(match);
+    return `__WRAPPED_IMAGE_${wrappedPatterns.length - 1}__`;
+  });
+
+  // 匹配需要包装的数学表达式
+  // 模式：包含数学符号的字母数字组合，如 x^2, a+b, A=, sin(x), log_2
+  const mathPattern = /(?<![$\w])([a-zA-Z][a-zA-Z0-9_]*(?:\^[0-9]?|[0-9]|_[a-zA-Z0-9]|)?(?:\s*[=\+\-\*\/×÷^]\s*[a-zA-Z0-9_]+(?:\^[0-9]?|[0-9]|_[a-zA-Z0-9]|)?)+|[a-zA-Z](?:\s*[=\+\-\*\/×÷^]\s*[0-9]+)+|[xyza-z]\s*[+\-*/=]\s*[xyza-z0-9]+|sin|cos|tan|log|ln|lg|\d+[+\-*/=]\d+)(?![$\w])/g;
+
+  result = result.replace(mathPattern, (match) => {
+    return `$${match.trim()}$`;
+  });
+
+  // 匹配单个大写字母变量后跟 = 或其他运算符，如 A=, B+, C-
+  const singleVarPattern = /(?<![$\w])([A-Z])(?=\s*[=+\-*/×÷])|(?<![$\w])([A-Z])(?=\s*$)/g;
+  result = result.replace(singleVarPattern, (match, p1, p2) => {
+    const varName = p1 || p2;
+    return `$${varName}$`;
+  });
+
+  // 恢复占位符
+  wrappedPatterns.forEach((pattern, index) => {
+    result = result.replace(`__WRAPPED_LATEX_${index}__`, pattern);
+  });
+  result = result.replace(/__WRAPPED_IMAGE_(\d+)__/g, (match, index) => {
+    return wrappedPatterns[parseInt(index)] || match;
+  });
+
+  return result;
+}
+
 // 将 markdown 内容转换为预览 HTML
 function markdownToPreviewHtml(text: string, baseUrl: string): string {
   if (!text) return '';
@@ -194,6 +247,9 @@ function htmlToMarkdown(html: string): string {
   text = text.replace(/&lt;/g, '<');
   text = text.replace(/&gt;/g, '>');
   text = text.replace(/&amp;/g, '&');
+
+  // 自动包装裸 LaTeX 表达式
+  text = autoWrapLatex(text);
 
   return text;
 }
