@@ -92,8 +92,8 @@ function markdownToPreviewHtml(text: string, baseUrl: string): string {
 function markdownToEditHtml(text: string, baseUrl: string): string {
   if (!text) return '';
 
-  // 如果内容已经包含 latex-source 或 image-container，说明是已处理过的，跳过
-  if (text.includes('class="latex-source"') || text.includes('class="image-container"')) {
+  // 如果内容已经包含 latex-source 或 image-container 或 katex，说明是已处理过的，跳过
+  if (text.includes('class="latex-source"') || text.includes('class="image-container"') || text.includes('class="katex"')) {
     return text;
   }
 
