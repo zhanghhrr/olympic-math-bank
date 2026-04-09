@@ -309,6 +309,7 @@ export function VisualLatexEditor({
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [showResizeHint, setShowResizeHint] = useState<{ x: number; y: number; width: number } | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
   const isSettingContentRef = useRef(false); // 标记是否正在程序化设置内容
 
@@ -534,15 +535,17 @@ export function VisualLatexEditor({
     setIsEditing(false);
   }, [onChange]);
 
-  // 点击外部离开编辑模式
+  // 点击外部离开编辑模式（但工具栏除外）
   useEffect(() => {
     if (!isEditing) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (!editorRef.current) return;
       const target = e.target as HTMLElement;
-      // 检查点击是否在编辑器外部
-      if (!editorRef.current.contains(target)) {
+      // 检查点击是否在编辑器或工具栏外部
+      const isInToolbar = toolbarRef.current?.contains(target);
+      const isInEditor = editorRef.current.contains(target);
+      if (!isInToolbar && !isInEditor) {
         // 点击外部，保存并离开编辑模式
         leaveEditMode();
       }
@@ -577,7 +580,9 @@ export function VisualLatexEditor({
     <div className={`border rounded-lg overflow-hidden ${className}`}>
       {isEditing ? (
         <>
-          <LatexToolbar onInsert={handleInsert} onLatexInsert={handleLatexInsert} />
+          <div ref={toolbarRef}>
+            <LatexToolbar onInsert={handleInsert} onLatexInsert={handleLatexInsert} />
+          </div>
           <div
             ref={editorRef}
             contentEditable
