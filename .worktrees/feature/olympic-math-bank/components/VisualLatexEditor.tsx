@@ -284,8 +284,8 @@ function htmlToMarkdown(html: string): string {
   text = text.replace(/&gt;/g, '>');
   text = text.replace(/&amp;/g, '&');
 
-  // 自动包装裸 LaTeX 表达式
-  text = autoWrapLatex(text);
+  // 自动包装裸 LaTeX 表达式 - 暂时禁用以修复崩溃问题
+  // text = autoWrapLatex(text);
 
   return text;
 }
