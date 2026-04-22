@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, ChevronDown, BookOpen, Loader2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, BookOpen, Loader2, Layers } from 'lucide-react';
 
 interface KnowledgeTag {
   id: string;
@@ -126,17 +126,17 @@ export default function KnowledgeTagsPage() {
     return (
       <div key={node.id} className="select-none">
         <div
-          className={`flex items-center gap-2 py-2 px-3 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors ${
-            depth > 0 ? 'ml-6 border-l-2 border-slate-200 pl-4' : ''
+          className={`flex items-center gap-2 py-2 px-3 hover:bg-muted/50 rounded-xl cursor-pointer transition-colors ${
+            depth > 0 ? 'ml-6 border-l-2 border-border pl-4' : ''
           }`}
           style={{ marginLeft: `${depth * 24}px` }}
           onClick={() => hasChildren && toggleExpand(node.id)}
         >
           {hasChildren ? (
             isExpanded ? (
-              <ChevronDown className="w-4 h-4 text-slate-400" />
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
             ) : (
-              <ChevronRight className="w-4 h-4 text-slate-400" />
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
             )
           ) : (
             <span className="w-4" />
@@ -146,14 +146,14 @@ export default function KnowledgeTagsPage() {
             {levelLabels[node.level]}
           </span>
 
-          <span className="font-medium text-slate-700">{node.name}</span>
+          <span className="font-medium text-foreground">{node.name}</span>
 
           {node._count?.questions > 0 && (
-            <span className="text-xs text-slate-400">({node._count.questions}题)</span>
+            <span className="text-xs text-muted-foreground">({node._count.questions}题)</span>
           )}
 
           {isLastLevel && (
-            <BookOpen className="w-3 h-3 text-slate-300 ml-auto" />
+            <BookOpen className="w-3 h-3 text-muted-foreground ml-auto" />
           )}
         </div>
 
@@ -175,18 +175,19 @@ export default function KnowledgeTagsPage() {
   }, {} as Record<number, number>);
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">五级知识标签管理</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            共 {tags.length} 个标签 | 
+          <h2 className="text-2xl font-semibold text-foreground tracking-tight">五级知识标签管理</h2>
+          <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+            <Layers className="w-4 h-4" />
+            <span>共 {tags.length} 个标签 |</span>
             {Object.entries(stats).map(([level, count]) => (
               <span key={level} className="ml-2">
                 {levelLabels[parseInt(level)]}: {count}个
               </span>
             ))}
-          </p>
+          </div>
         </div>
       </div>
 
@@ -196,10 +197,10 @@ export default function KnowledgeTagsPage() {
           <button
             key={module}
             onClick={() => setSelectedModule(module)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
               selectedModule === module
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                ? 'bg-primary text-primary-foreground shadow-md'
+                : 'bg-muted text-muted-foreground hover:bg-muted/80'
             }`}
           >
             {module}
@@ -210,13 +211,13 @@ export default function KnowledgeTagsPage() {
       {/* 标签树 */}
       {loading ? (
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-          <span className="ml-2 text-slate-500">加载中...</span>
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          <span className="ml-2 text-muted-foreground">加载中...</span>
         </div>
       ) : (
-        <div className="bg-white rounded-lg border">
-          <div className="p-4 border-b bg-slate-50">
-            <h3 className="font-medium text-slate-700">
+        <div className="card-elevated overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/50">
+            <h3 className="font-medium text-foreground">
               {selectedModule} - 知识标签树
             </h3>
           </div>
@@ -224,7 +225,7 @@ export default function KnowledgeTagsPage() {
             {treeData.length > 0 ? (
               treeData.map(node => renderNode(node))
             ) : (
-              <div className="text-center py-8 text-slate-400">
+              <div className="text-center py-8 text-muted-foreground">
                 暂无标签数据
               </div>
             )}

@@ -89,7 +89,7 @@ export function LatexEditor({
               <p className="text-xs text-gray-500 mb-2">图片预览（可拖动调整尺寸）：</p>
               <div className="flex flex-wrap gap-4">
                 {images.map((img, index) => (
-                  <EditableImage
+                  <ResizableImage
                     key={index}
                     src={getImageUrl(img.url)}
                     alt={img.alt}

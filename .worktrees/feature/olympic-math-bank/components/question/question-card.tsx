@@ -72,8 +72,8 @@ export function QuestionCard({
 
   return (
     <div
-      className={`border rounded-lg p-4 transition-all ${
-        isSelected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'
+      className={`border border-border rounded-xl p-4 transition-all ${
+        isSelected ? 'border-primary bg-primary/5' : 'bg-surface hover:shadow-md'
       }`}
     >
       {/* Header */}
@@ -83,32 +83,32 @@ export function QuestionCard({
           type="checkbox"
           checked={isSelected}
           onChange={(e) => onSelect(question.id, e.target.checked)}
-          className="mt-1 w-4 h-4 text-blue-600 rounded cursor-pointer"
+          className="mt-1 w-4 h-4 text-primary rounded cursor-pointer"
         />
 
         {/* Content Preview */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
-            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
+            <span className="badge badge-draft">
               {getTypeLabel(question.type)}
             </span>
-            <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded text-xs">
+            <span className="badge bg-warning/10 text-warning">
               难度 {question.difficulty}
             </span>
-            <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+            <span className="badge badge-pending">
               {question.status === 'DRAFT' ? '草稿' : question.status}
             </span>
           </div>
 
           {/* Question Content Preview */}
-          <p className="text-slate-800 text-sm line-clamp-2 mb-2">
+          <p className="text-foreground text-sm line-clamp-2 mb-2">
             {question.content.length > 100
               ? question.content.substring(0, 100) + '...'
               : question.content}
           </p>
 
           {/* Answer Preview */}
-          <p className="text-slate-600 text-xs mb-2">
+          <p className="text-muted-foreground text-xs mb-2">
             <span className="font-medium">答案：</span>
             {question.answer.length > 50
               ? question.answer.substring(0, 50) + '...'
@@ -121,7 +121,7 @@ export function QuestionCard({
               {question.matchedTags.map((tag) => (
                 <span
                   key={tag.id}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs"
                   title={tag.path}
                 >
                   <Tag className="w-3 h-3" />
@@ -129,7 +129,7 @@ export function QuestionCard({
                   {isEditing && (
                     <button
                       onClick={() => onRemoveTag(question.id, tag.id)}
-                      className="ml-1 hover:text-red-600"
+                      className="ml-1 hover:text-error"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -140,7 +140,7 @@ export function QuestionCard({
           )}
 
           {question.matchedTags.length === 0 && (
-            <p className="text-slate-400 text-xs italic mb-2">未打标签</p>
+            <p className="text-muted-foreground text-xs italic mb-2">未打标签</p>
           )}
         </div>
 
@@ -150,7 +150,7 @@ export function QuestionCard({
             variant="ghost"
             size="sm"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="h-8 px-2"
+            className="h-8 px-2 hover:bg-muted"
           >
             {isExpanded ? (
               <ChevronUp className="w-4 h-4" />
@@ -163,7 +163,7 @@ export function QuestionCard({
               variant="ghost"
               size="sm"
               onClick={() => setIsEditing(true)}
-              className="h-8 px-2"
+              className="h-8 px-2 hover:bg-muted"
             >
               <Edit2 className="w-4 h-4" />
             </Button>
@@ -173,43 +173,43 @@ export function QuestionCard({
 
       {/* Expanded Content */}
       {isExpanded && (
-        <div className="mt-4 pt-4 border-t border-slate-200">
+        <div className="mt-4 pt-4 border-t border-border">
           {isEditing ? (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">题干</label>
+                <label className="block text-sm font-medium text-foreground mb-1">题干</label>
                 <textarea
                   value={editData.content}
                   onChange={(e) => setEditData({ ...editData, content: e.target.value })}
                   rows={4}
-                  className="w-full px-3 py-2 border rounded-md text-sm"
+                  className="input-field"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">答案</label>
+                <label className="block text-sm font-medium text-foreground mb-1">答案</label>
                 <textarea
                   value={editData.answer}
                   onChange={(e) => setEditData({ ...editData, answer: e.target.value })}
                   rows={2}
-                  className="w-full px-3 py-2 border rounded-md text-sm"
+                  className="input-field"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">解析</label>
+                <label className="block text-sm font-medium text-foreground mb-1">解析</label>
                 <textarea
                   value={editData.solution}
                   onChange={(e) => setEditData({ ...editData, solution: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 border rounded-md text-sm"
+                  className="input-field"
                   placeholder="可选"
                 />
               </div>
               <div className="flex gap-2 justify-end">
-                <Button variant="outline" size="sm" onClick={handleCancel}>
+                <Button variant="outline" size="sm" onClick={handleCancel} className="border-border hover:bg-muted rounded-xl">
                   <X className="w-4 h-4 mr-1" />
                   取消
                 </Button>
-                <Button size="sm" onClick={handleSave}>
+                <Button size="sm" onClick={handleSave} className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl">
                   <Save className="w-4 h-4 mr-1" />
                   保存
                 </Button>
@@ -218,17 +218,17 @@ export function QuestionCard({
           ) : (
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-slate-500 mb-1">题干</label>
-                <QuestionContent content={question.content} className="text-slate-800 text-sm" />
+                <label className="block text-sm font-medium text-muted-foreground mb-1">题干</label>
+                <QuestionContent content={question.content} className="text-foreground text-sm" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-500 mb-1">答案</label>
-                <QuestionContent content={question.answer} className="text-slate-800 text-sm" />
+                <label className="block text-sm font-medium text-muted-foreground mb-1">答案</label>
+                <QuestionContent content={question.answer} className="text-foreground text-sm" />
               </div>
               {question.solution && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-500 mb-1">解析</label>
-                  <QuestionContent content={question.solution} className="text-slate-600 text-sm" />
+                  <label className="block text-sm font-medium text-muted-foreground mb-1">解析</label>
+                  <QuestionContent content={question.solution} className="text-muted-foreground text-sm" />
                 </div>
               )}
             </div>

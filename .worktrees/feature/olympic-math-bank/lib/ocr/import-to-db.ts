@@ -13,7 +13,7 @@ const prisma = new PrismaClient();
  * 去除题干开头的题号
  * 支持格式：1. 2. 1、 2、 (1) (2) 第1题 第2题 一、二、三 ① ② ③ 等
  */
-function stripQuestionNumber(content: string): string {
+export function stripQuestionNumber(content: string): string {
   if (!content) return content;
   
   // 匹配常见题号格式：数字+点/顿号、括号数字、中文数字+逗号、圆圈数字等
@@ -80,13 +80,19 @@ export async function smartImportFromOCR(
       // 自动匹配知识标签（题目内容 + 答案内容 + 解析内容）
       let matchedTagIds: string[] = [];
       if (autoMatchTags && parsed.content) {
-        // 合并内容：题目 + 答案 + 解析，【标注】内容在答案中
-        const combinedContent = [
-          parsed.content,
-          parsed.answer || '',
-          parsed.analysis || ''
-        ].join(' ');
-        matchedTagIds = await autoMatchKnowledgeTags(combinedContent, parsed.title);
+        try {
+          // 合并内容：题目 + 答案 + 解析，【标注】内容在答案中
+          const combinedContent = [
+            parsed.content,
+            parsed.answer || '',
+            parsed.analysis || ''
+          ].join(' ');
+          matchedTagIds = await autoMatchKnowledgeTags(combinedContent, parsed.title);
+        } catch (tagError) {
+          console.error('[Import Warning] 自动打标签失败，跳过:', tagError);
+          // 打标签失败不影响导入，继续
+          matchedTagIds = [];
+        }
       }
 
       // 确定题目类型
@@ -150,6 +156,7 @@ export async function smartImportFromOCR(
         matchedTagDetails,
       });
     } catch (error) {
+      console.error(`[Import Error] 题目导入失败:`, error);
       result.failed++;
       result.questions.push({
         success: false,
@@ -166,7 +173,7 @@ export async function smartImportFromOCR(
  * 根据题目内容智能匹配五级知识标签
  * 返回匹配的标签ID列表（最多5个）
  */
-async function autoMatchKnowledgeTags(content: string, title?: string): Promise<string[]> {
+export async function autoMatchKnowledgeTags(content: string, title?: string): Promise<string[]> {
   const matchedTagIds: string[] = [];
   const searchText = (title + ' ' + content).toLowerCase();
   const matchedScores: Array<{ tagId: string; score: number; tagName: string; level: number; tag: any }> = [];
@@ -284,7 +291,7 @@ export async function getQuestionTagPaths(questionId: string): Promise<string[]>
 /**
  * 检测题目类型 - 限定为四类：填空题、选择题、解答题、计算题
  */
-function detectQuestionType(content: string): QuestionType {
+export function detectQuestionType(content: string): QuestionType {
   const lowerContent = content.toLowerCase();
 
   // 1. 检测计算题（优先级最高）
@@ -317,7 +324,7 @@ function detectQuestionType(content: string): QuestionType {
 /**
  * 估算题目难度
  */
-function estimateDifficulty(content: string): number {
+export function estimateDifficulty(content: string): number {
   let difficulty = 2; // 默认难度
 
   // 根据内容长度估算

@@ -775,8 +775,10 @@ export class HybridQuestionIdentifier {
     }
 
     // 2. 检测选择题
-    // 特征：包含选项A/B/C/D，或有"选择"字样
-    if (/[A-D][\.、\s]/.test(content) || /选项|选择/.test(content)) {
+    // 特征：包含选项A/B/C/D，且选项格式正确（如A. B. C. D. 或 A、B、C、D）
+    // 更严格的检测：确保A/B/C/D是选项标记，而不是单词中的字母
+    const choicePattern = /(?:^|[^\u4e00-\u9fa5A-Za-z])([A-D])[.、：:]\s|\b选择[题項]|^选项\s/m;
+    if (choicePattern.test(content) || /[A-D][.、]\s*[A-D][.、]/.test(content)) {
       return '选择题';
     }
 
@@ -885,6 +887,127 @@ export class HybridQuestionIdentifier {
   }
 
   /**
+   * 移除答案中的无关标签
+   * 包括【标注】、【业务题型】等OCR残留
+   */
+  private removeUselessAnswerTags(answer: string): string {
+    let cleaned = answer;
+
+    // 移除图片标记 ![](...) 及其后面的所有内容
+    cleaned = cleaned.replace(/!\[.*?\]\(.*?\)/g, '');
+    cleaned = cleaned.replace(/!\[.*?\]\(.*?\)/g, '');
+
+    // 移除【标注】及其后面的所有内容（支持换行）
+    cleaned = cleaned.replace(/【标注】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【标注】[\s\S]*/g, '');
+
+    // 移除【业务题型】及其后面的所有内容
+    cleaned = cleaned.replace(/【业务题型】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【业务题型】[\s\S]*/g, '');
+
+    // 移除【知识点】、【题型分类】等常见无关标签
+    cleaned = cleaned.replace(/【知识点】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【知识点】[\s\S]*/g, '');
+    cleaned = cleaned.replace(/【题型分类】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【题型分类】[\s\S]*/g, '');
+    cleaned = cleaned.replace(/【参考】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【参考】[\s\S]*/g, '');
+    cleaned = cleaned.replace(/【思想】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【思想】[\s\S]*/g, '');
+    cleaned = cleaned.replace(/【能力】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【能力】[\s\S]*/g, '');
+    cleaned = cleaned.replace(/【解答】[\s\S]*$/, '');
+    cleaned = cleaned.replace(/【解答】[\s\S]*/g, '');
+
+    // 清理多余空行
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+    return cleaned.trim();
+  }
+
+  /**
+   * 根据题型清洗答案内容
+   * - 填空题：只保留空里该填的内容（数字或简短答案）
+   * - 选择题：只保留选项字母
+   * - 解答题/计算题：只保留最简洁的答案
+   */
+  private cleanAnswerByType(answer: string, questionType: QuestionType): string {
+    if (!answer) return '';
+
+    let cleaned = answer.trim();
+
+    // 根据题型进行特定处理
+    if (questionType === '选择题') {
+      // 选择题：只保留选项字母（A、B、C、D）
+      // 先移除选项描述（如"A. 123" 只保留"A"）
+      const optionMatch = cleaned.match(/^[A-D][\.、\s]?\s*(.+)/);
+      if (optionMatch) {
+        // 如果选项是一个简短内容，直接取选项字母
+        cleaned = optionMatch[1].trim();
+        // 检查是否是纯选项格式（如"A、B"或"A B C D"）
+        if (/^[A-D][\.、\s][A-D][\.、\s]/.test(cleaned) || /^[A-D]\s+[A-D]\s+/.test(cleaned)) {
+          // 多选项格式：提取所有选项字母
+          const letters = cleaned.match(/[A-D]/g);
+          if (letters) {
+            return letters.join('');
+          }
+        }
+      }
+      // 直接提取字母
+      const letters = cleaned.match(/[A-D]/g);
+      if (letters && letters.length > 0) {
+        // 如果只有一个字母，直接返回
+        if (letters.length === 1) {
+          return letters[0];
+        }
+        // 如果有多个字母，返回第一个（常见于单选题）
+        return letters[0];
+      }
+      return cleaned;
+    }
+
+    if (questionType === '填空题') {
+      // 填空题：只保留答案中的数值或简短内容
+      // 常见格式：数字、分数、简单表达式
+      // 取最后一部分（通常答案是放在最后的）
+      const parts = cleaned.split(/\n/).filter(p => p.trim());
+      if (parts.length > 0) {
+        const lastPart = parts[parts.length - 1].trim();
+        // 如果是纯数字或简单表达式，直接返回
+        if (/^[\d\.\/\+\-\*\^\(\)]+$/.test(lastPart)) {
+          return lastPart;
+        }
+        // 如果包含数字，尝试提取数字部分
+        const numMatch = lastPart.match(/(\d+(?:\.\d+)?(?:\/\d+)?)/);
+        if (numMatch) {
+          return numMatch[1];
+        }
+        // 否则返回最后一行
+        return lastPart;
+      }
+      return cleaned;
+    }
+
+    if (questionType === '解答题' || questionType === '计算题') {
+      // 解答题/计算题：只保留最简洁的答案
+      // 取第一行，去掉"解："、"答："等前缀
+      const firstLine = cleaned.split(/\n/)[0].trim();
+      const simplified = firstLine
+        .replace(/^(解|答)[：:]\s*/, '')
+        .replace(/^(原式|计算)[：:]\s*/, '')
+        .trim();
+
+      // 如果简化后为空或太短，返回原答案的第一行
+      if (simplified.length > 0) {
+        return simplified;
+      }
+      return firstLine.length > 0 ? firstLine : cleaned.substring(0, 50);
+    }
+
+    return cleaned;
+  }
+
+  /**
    * 将识别块转换为标准题目格式
    */
   convertToQuestions(blocks: IdentifiedBlock[]): ParsedQuestion[] {
@@ -912,14 +1035,21 @@ export class HybridQuestionIdentifier {
       let answer = block.answer ? this.cleanQuestionContent(block.answer) : undefined;
 
       if (answer) {
-        const analysisMatch = answer.match(/【解析】([\s\S]*?)(?=\n\n|$)/);
+        // 先移除【标注】和【业务题型】等无关文本
+        answer = this.removeUselessAnswerTags(answer);
+
+        // 提取【解析】部分：匹配【解析】到下一个【...】标签之前的所有内容
+        const analysisMatch = answer.match(/【解析】([\s\S]*?)(?=【|$)/);
         if (analysisMatch) {
           analysis = analysisMatch[1].trim();
           // 从答案中移除解析部分
-          answer = answer.replace(/【解析】[\s\S]*?(?=\n\n|$)/, '').trim();
+          answer = answer.replace(/【解析】[\s\S]*?(?=【|$)/, '').trim();
         }
         // 移除答案标记
         answer = answer.replace(/^【答案】/, '').trim();
+
+        // 用户需求：答案就是紧跟着【答案】之后的，在【解析】之前的文本
+        // 不再根据题型进一步精简答案
       }
 
       // 确保内容以正确的题号开头

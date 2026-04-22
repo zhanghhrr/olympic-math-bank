@@ -128,20 +128,20 @@ export default function TagsPage() {
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-6 animate-fade-in">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold">标签管理</h2>
+          <h2 className="text-2xl font-semibold text-foreground tracking-tight">标签管理</h2>
         </div>
-        <div className="text-center py-12 text-slate-500">加载中...</div>
+        <div className="text-center py-12 text-muted-foreground">加载中...</div>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">标签管理</h2>
-        <Button onClick={openCreateModal}>
+    <div className="p-6 space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold text-foreground tracking-tight">标签管理</h2>
+        <Button onClick={openCreateModal} className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl">
           <Plus className="w-4 h-4 mr-2" />
           新建标签
         </Button>
@@ -150,11 +150,11 @@ export default function TagsPage() {
       {/* 标签列表 */}
       <div className="space-y-6">
         {Object.entries(groupedTags).map(([type, typeTags]) => (
-          <div key={type} className="bg-white rounded-lg border">
-            <div className="px-4 py-3 border-b bg-slate-50">
-              <h3 className="font-medium text-slate-700">
+          <div key={type} className="card-elevated overflow-hidden">
+            <div className="px-4 py-3 border-b border-border bg-muted/50">
+              <h3 className="font-medium text-foreground">
                 {typeLabels[type] || type}
-                <span className="ml-2 text-sm text-slate-500">({typeTags.length})</span>
+                <span className="ml-2 text-sm text-muted-foreground">({typeTags.length})</span>
               </h3>
             </div>
             <div className="p-4">
@@ -162,26 +162,26 @@ export default function TagsPage() {
                 {typeTags.map((tag) => (
                   <div
                     key={tag.id}
-                    className="flex items-center gap-2 px-3 py-2 border rounded-lg hover:bg-slate-50"
+                    className="flex items-center gap-2 px-3 py-2 border border-border rounded-xl hover:bg-muted/50 transition-colors"
                   >
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${typeColors[tag.type] || 'bg-gray-100'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${typeColors[tag.type] || 'bg-muted'}`}>
                       {tag.name}
                     </span>
                     {tag.description && (
-                      <span className="text-xs text-slate-500">{tag.description}</span>
+                      <span className="text-xs text-muted-foreground">{tag.description}</span>
                     )}
-                    <span className="text-xs text-slate-400">({tag._count.questions}题)</span>
+                    <span className="text-xs text-muted-foreground">({tag._count.questions}题)</span>
                     <button
                       onClick={() => openEditModal(tag)}
-                      className="p-1 hover:bg-slate-200 rounded"
+                      className="p-1 hover:bg-muted rounded transition-colors"
                     >
-                      <Edit2 className="w-3 h-3 text-slate-500" />
+                      <Edit2 className="w-3 h-3 text-muted-foreground" />
                     </button>
                     <button
                       onClick={() => handleDelete(tag.id)}
-                      className="p-1 hover:bg-red-100 rounded"
+                      className="p-1 hover:bg-error/10 rounded transition-colors"
                     >
-                      <Trash2 className="w-3 h-3 text-red-500" />
+                      <Trash2 className="w-3 h-3 text-error" />
                     </button>
                   </div>
                 ))}
@@ -193,28 +193,28 @@ export default function TagsPage() {
 
       {/* 创建/编辑模态框 */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold mb-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fade-in">
+          <div className="bg-surface rounded-xl p-6 w-full max-w-md shadow-xl">
+            <h3 className="text-lg font-semibold text-foreground mb-4">
               {editingTag ? '编辑标签' : '新建标签'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">标签名称</label>
+                <label className="block text-sm font-medium text-foreground mb-1">标签名称</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md"
+                  className="input-field"
                   required
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">类型</label>
+                <label className="block text-sm font-medium text-foreground mb-1">类型</label>
                 <select
                   value={formData.type}
                   onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md"
+                  className="input-field"
                 >
                   <option value="GRADE">年级</option>
                   <option value="DIFFICULTY">难度</option>
@@ -223,32 +223,33 @@ export default function TagsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">描述</label>
+                <label className="block text-sm font-medium text-foreground mb-1">描述</label>
                 <input
                   type="text"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-md"
+                  className="input-field"
                   placeholder="可选"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">排序</label>
+                <label className="block text-sm font-medium text-foreground mb-1">排序</label>
                 <input
                   type="number"
                   value={formData.order}
                   onChange={(e) => setFormData({ ...formData, order: parseInt(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 border rounded-md"
+                  className="input-field"
                 />
               </div>
               <div className="flex gap-3 pt-4">
-                <Button type="submit">
+                <Button type="submit" className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl">
                   {editingTag ? '保存' : '创建'}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setShowModal(false)}
+                  className="border-border hover:bg-muted rounded-xl"
                 >
                   取消
                 </Button>

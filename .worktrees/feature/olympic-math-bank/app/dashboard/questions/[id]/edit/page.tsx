@@ -80,33 +80,42 @@ export default function EditQuestionPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto space-y-6 p-6">
-      <div className="flex items-center gap-4">
-        <Link href="/dashboard/questions">
-          <Button variant="outline" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            返回
-          </Button>
-        </Link>
-        <h2 className="text-2xl font-bold">编辑题目</h2>
+    <div className="h-full overflow-y-auto bg-muted/30 p-6">
+      <div className="max-w-5xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <Link href="/dashboard/questions">
+            <Button variant="outline" size="sm" className="border-border hover:bg-muted rounded-xl">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              返回
+            </Button>
+          </Link>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground tracking-tight">编辑题目</h2>
+            <p className="text-sm text-muted-foreground">修改题目信息，系统自动保存历史版本</p>
+          </div>
+        </div>
+        {/* Form Container */}
+        <div className="card-elevated p-6">
+          <QuestionForm
+            initialData={{
+              content: question.content,
+              answer: question.answer,
+              solution: question.solution || '',
+              type: question.type,
+              grade: question.grade,
+              difficulty: question.difficulty,
+              source: question.source || '',
+              year: question.year || new Date().getFullYear(),
+              competition: question.competition || '',
+              tagIds: question.tags.map((t) => t.tagId),
+              knowledgeTagIds: question.knowledgeTags.map((t) => t.knowledgeTagId),
+            }}
+            onSubmit={handleSubmit}
+            isSubmitting={isSubmitting}
+          />
+        </div>
       </div>
-      <QuestionForm
-        initialData={{
-          content: question.content,
-          answer: question.answer,
-          solution: question.solution || '',
-          type: question.type,
-          grade: question.grade,
-          difficulty: question.difficulty,
-          source: question.source || '',
-          year: question.year || new Date().getFullYear(),
-          competition: question.competition || '',
-          tagIds: question.tags.map((t) => t.tagId),
-          knowledgeTagIds: question.knowledgeTags.map((t) => t.knowledgeTagId),
-        }}
-        onSubmit={handleSubmit}
-        isSubmitting={isSubmitting}
-      />
     </div>
   );
 }

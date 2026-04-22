@@ -1,38 +1,449 @@
 @import "tailwindcss";
 
+/* ============================================
+   Olympic Math Bank - Claude Style Theme
+   Design Direction: Warm, Clean, Mathematical
+   Inspired by Claude's design language
+   ============================================ */
+
 @theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222.2 84% 4.9%);
+  /* Primary - Warm Terracotta */
+  --color-primary: hsl(24 65% 68%);
+  --color-primary-foreground: hsl(24 30% 20%);
+  --color-primary-hover: hsl(24 60% 60%);
+  --color-primary-light: hsl(24 65% 95%);
+
+  /* Secondary - Dark Surface */
+  --color-secondary: hsl(0 0% 10%);
+  --color-secondary-foreground: hsl(0 0% 98%);
+  --color-secondary-light: hsl(0 0% 96%);
+
+  /* Accent - Rich Terracotta */
+  --color-accent: hsl(24 70% 55%);
+  --color-accent-foreground: hsl(0 0% 100%);
+
+  /* Background & Surface */
+  --color-background: hsl(30 20% 98%);
+  --color-foreground: hsl(0 0% 10%);
+  --color-surface: hsl(0 0% 100%);
+  --color-surface-elevated: hsl(0 0% 100%);
+
+  /* Muted */
+  --color-muted: hsl(30 15% 94%);
+  --color-muted-foreground: hsl(0 0% 45%);
+
+  /* Status Colors */
+  --color-success: hsl(152 55% 42%);
+  --color-success-light: hsl(152 55% 94%);
+  --color-warning: hsl(24 80% 55%);
+  --color-warning-light: hsl(24 80% 94%);
+  --color-error: hsl(0 70% 55%);
+  --color-error-light: hsl(0 70% 95%);
+
+  /* Card */
   --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222.2 84% 4.9%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(222.2 84% 4.9%);
-  --color-primary: hsl(222.2 47.4% 11.2%);
-  --color-primary-foreground: hsl(210 40% 98%);
-  --color-secondary: hsl(210 40% 96.1%);
-  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-muted: hsl(210 40% 96.1%);
-  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
-  --color-accent: hsl(210 40% 96.1%);
-  --color-accent-foreground: hsl(222.2 47.4% 11.2%);
-  --color-destructive: hsl(0 84.2% 60.2%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-border: hsl(214.3 31.8% 91.4%);
-  --color-input: hsl(214.3 31.8% 91.4%);
-  --color-ring: hsl(222.2 84% 4.9%);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-card-foreground: hsl(0 0% 10%);
+
+  /* Border */
+  --color-border: hsl(30 10% 88%);
+  --color-border-light: hsl(30 10% 94%);
+  --color-ring: hsl(24 65% 60%);
+
+  /* Radius - More rounded like Claude */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+
+  /* Shadows - Soft and warm */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 16px 40px rgba(0, 0, 0, 0.1);
 }
 
 :root {
-  --radius: 0.5rem;
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(222.2 84% 4.9%);
+  --radius: 0.75rem;
+  --background: hsl(30 20% 98%);
+  --foreground: hsl(0 0% 10%);
 }
+
+/* ============================================
+   Base Styles
+   ============================================ */
 
 body {
   background-color: var(--background);
   color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+/* Smooth Scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Selection - Warm highlight */
+::selection {
+  background-color: hsl(24 65% 88%);
+  color: hsl(24 30% 20%);
+}
+
+/* ============================================
+   Custom Scrollbar - Subtle and clean
+   ============================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(30 10% 80%);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(30 10% 65%);
+}
+
+/* ============================================
+   Animation Keyframes
+   ============================================ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Animation Utilities */
+.animate-fade-in {
+  animation: fadeIn 0.35s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out forwards;
+}
+
+/* Staggered Animation Delays */
+.stagger-1 { animation-delay: 40ms; }
+.stagger-2 { animation-delay: 80ms; }
+.stagger-3 { animation-delay: 120ms; }
+.stagger-4 { animation-delay: 160ms; }
+.stagger-5 { animation-delay: 200ms; }
+
+/* ============================================
+   Card Styles - Warm, elevated
+   ============================================ */
+
+.card-elevated {
+  background: var(--color-surface);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--color-border);
+  transition: all 0.2s ease;
+}
+
+.card-elevated:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-2px);
+}
+
+/* ============================================
+   Button Base Enhancements - Warm tones
+   ============================================ */
+
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+  border-radius: var(--radius-lg);
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.btn-primary:hover {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: var(--color-secondary);
+  color: var(--color-secondary-foreground);
+  border-radius: var(--radius-lg);
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* ============================================
+   Status Badge Styles - Warm, rounded pills
+   ============================================ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 9999px;
+  transition: all 0.15s ease;
+  letter-spacing: 0.01em;
+}
+
+.badge-draft {
+  background: hsl(30 10% 92%);
+  color: hsl(0 0% 40%);
+}
+
+.badge-pending {
+  background: hsl(24 60% 92%);
+  color: hsl(24 45% 40%);
+  border: 1px solid hsl(24 50% 85%);
+}
+
+.badge-approved {
+  background: hsl(152 55% 92%);
+  color: hsl(152 50% 35%);
+  border: 1px solid hsl(152 50% 82%);
+}
+
+.badge-rejected {
+  background: hsl(0 70% 92%);
+  color: hsl(0 60% 40%);
+  border: 1px solid hsl(0 60% 85%);
+}
+
+/* ============================================
+   Input Styles - Clean and warm
+   ============================================ */
+
+.input-field {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+  letter-spacing: 0.01em;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+.input-field::placeholder {
+  color: var(--color-muted-foreground);
+}
+
+/* ============================================
+   Select/Dropdown Styles - Soft and adaptive
+   ============================================ */
+
+.select-field {
+  display: inline-block;
+  width: auto;
+  min-width: 120px;
+  padding: 0.5rem 2rem 0.5rem 0.875rem;
+  border: 1px solid var(--color-border);
+  border-radius: 9999px;
+  background: var(--color-surface);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  padding-right: 2.25rem;
+}
+
+.select-field:hover {
+  border-color: var(--color-primary);
+  background-color: var(--color-primary-light);
+}
+
+.select-field:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-light);
+}
+
+/* Full-width variant */
+.select-field-full {
+  width: 100%;
+  border-radius: var(--radius-lg);
+  padding-right: 2.5rem;
+}
+
+/* Small variant */
+.select-field-sm {
+  padding: 0.375rem 1.75rem 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  min-width: 100px;
+  background-size: 14px;
+}
+
+/* ============================================
+   Question Type Colors - Warm palette
+   ============================================ */
+
+.type-fill-blank {
+  background: hsl(270 40% 94%);
+  color: hsl(270 35% 45%);
+  border: 1px solid hsl(270 40% 88%);
+}
+
+.type-choice {
+  background: hsl(221 60% 94%);
+  color: hsl(221 55% 45%);
+  border: 1px solid hsl(221 60% 88%);
+}
+
+.type-solution {
+  background: hsl(152 45% 94%);
+  color: hsl(152 40% 40%);
+  border: 1px solid hsl(152 45% 88%);
+}
+
+.type-calculation {
+  background: hsl(24 60% 94%);
+  color: hsl(24 50% 45%);
+  border: 1px solid hsl(24 60% 88%);
+}
+
+/* ============================================
+   Difficulty Stars - Warm gold
+   ============================================ */
+
+.difficulty-star {
+  transition: all 0.15s ease;
+  color: hsl(40 80% 55%);
+}
+
+.difficulty-star:hover {
+  transform: scale(1.15);
+}
+
+/* ============================================
+   Page Transition - Smooth
+   ============================================ */
+
+.page-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* ============================================
+   Decorative Elements
+   ============================================ */
+
+.warm-gradient {
+  background: linear-gradient(135deg, hsl(24 60% 95%) 0%, hsl(30 20% 98%) 100%);
+}
+
+.terracotta-accent {
+  background: linear-gradient(135deg, hsl(24 65% 70%) 0%, hsl(24 55% 60%) 100%);
+}
+
+.soft-glow {
+  box-shadow: 0 0 40px rgba(232, 168, 124, 0.15);
+}
+
+/* ============================================
+   KaTeX Enhancements
+   ============================================ */
+
+.katex-display {
+  margin: 1rem 0;
+  padding: 0.75rem 1.25rem;
+  background: hsl(30 15% 96%);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  border: 1px solid var(--color-border-light);
+}
+
+.latex-inline {
+  padding: 0 0.125rem;
+}
+
+/* ============================================
+   Sidebar - Clean and minimal
+   ============================================ */
+
+.sidebar-active {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.sidebar-item:hover:not(.sidebar-active) {
+  background: var(--color-muted);
+}
+
+/* ============================================
+   Focus States - Warm outline
+   ============================================ */
+
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }

@@ -15,9 +15,9 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background warm-gradient">
       <Sidebar user={session.user} />
-      <div className="ml-64 h-screen overflow-hidden">
+      <div className="ml-60 h-screen overflow-hidden">
         <main className="h-full">{children}</main>
       </div>
     </div>

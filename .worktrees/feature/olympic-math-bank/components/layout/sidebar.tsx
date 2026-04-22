@@ -12,6 +12,7 @@ import {
   Layers,
   Settings,
   LogOut,
+  BookMarked,
 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
 
@@ -29,11 +30,24 @@ export function Sidebar({ user }: { user: any }) {
   const pathname = usePathname();
 
   return (
-    <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-slate-200 flex flex-col">
-      <div className="p-6">
-        <h1 className="text-xl font-bold text-slate-900">奥数题库系统</h1>
+    <div className="fixed left-0 top-0 h-full w-60 bg-surface border-r border-border flex flex-col">
+      {/* Logo */}
+      <div className="p-5 border-b border-border">
+        <Link href="/dashboard" className="flex items-center gap-3 group">
+          <div className="w-10 h-10 rounded-xl terracotta-accent flex items-center justify-center shadow-md group-hover:shadow-lg transition-shadow duration-200">
+            <BookMarked className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-foreground tracking-tight">
+              奥数题库
+            </h1>
+            <p className="text-xs text-muted-foreground">管理系统</p>
+          </div>
+        </Link>
       </div>
-      <nav className="px-4 space-y-1 flex-1">
+
+      {/* Navigation */}
+      <nav className="px-3 py-4 space-y-1 flex-1">
         {navigation.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
@@ -41,25 +55,32 @@ export function Sidebar({ user }: { user: any }) {
               key={item.name}
               href={item.href}
               className={cn(
-                'flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
                 isActive
-                  ? 'bg-slate-900 text-white'
-                  : 'text-slate-600 hover:bg-slate-100'
+                  ? 'sidebar-active shadow-sm'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
-              <item.icon className="w-5 h-5" />
+              <item.icon className={cn('w-5 h-5', isActive ? '' : 'opacity-70')} />
               {item.name}
             </Link>
           );
         })}
       </nav>
-      <div className="p-4 border-t border-slate-200">
-        <div className="px-4 py-2 text-sm text-slate-600">
-          {user?.name || user?.email}
+
+      {/* User Section */}
+      <div className="p-3 border-t border-border">
+        <div className="px-4 py-3 mb-2 rounded-xl bg-muted/60">
+          <p className="text-sm font-medium text-foreground truncate">
+            {user?.name || '用户'}
+          </p>
+          <p className="text-xs text-muted-foreground truncate">
+            {user?.email}
+          </p>
         </div>
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}
-          className="flex items-center gap-3 px-4 py-3 w-full text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+          className="flex items-center gap-3 px-4 py-2.5 w-full text-sm font-medium text-muted-foreground hover:bg-error/5 hover:text-error rounded-xl transition-all duration-200"
         >
           <LogOut className="w-5 h-5" />
           退出登录

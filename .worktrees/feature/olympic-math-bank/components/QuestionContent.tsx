@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import katex from 'katex';
 import { useImageUrl } from '@/hooks/useImageUrl';
 import { ImageModal } from './ImageModal';
@@ -53,94 +53,163 @@ function renderLatexToHtml(text: string): string {
   return text;
 }
 
-// 处理内容，解析图片和 LaTeX
-function parseContent(text: string, getImageUrl: (path: string) => string) {
+// 对齐块类型
+interface AlignBlock {
+  type: 'align';
+  align: 'left' | 'center' | 'right';
+  content: string;
+}
+
+// 处理内容，解析图片、LaTeX 和对齐格式
+function parseContent(text: string, getImageUrl: (path: string) => string): Array<{
+  type: 'text' | 'image' | 'align';
+  content: string;
+  src?: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+  align?: 'left' | 'center' | 'right';
+}> {
   const parts: Array<{
-    type: 'text' | 'image';
+    type: 'text' | 'image' | 'align';
     content: string;
     src?: string;
     alt?: string;
     width?: number;
     height?: number;
+    align?: 'left' | 'center' | 'right';
   }> = [];
 
-  // 先渲染 LaTeX（这样图片中的 LaTeX 也会被处理）
-  const htmlContent = renderLatexToHtml(text);
-
-  // 匹配 Markdown 图片，支持 =WxH= 尺寸语法
-  // 格式：![alt](url =WxH=) 或 ![alt](url "width x height")
-  const mdImageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+(?:=([0-9]+)x([0-9]+)=|"([^"]+)")?)?\)/gi;
-  // 匹配 HTML 图片 <img src="...">
-  const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
-
+  // 先解析对齐块 :::left/center/right ... :::
+  // 匹配 :::left\n内容\n:::
+  const alignRegex = /:::(\w+)\n([\s\S]*?)\n:::/g;
   let lastIndex = 0;
   let match;
 
-  // 处理 Markdown 图片
-  const combinedRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+(?:=([0-9]+)x([0-9]+)=|"([^"]+)")?)?\)|<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  // 先处理对齐块
+  const tempParts: Array<{ start: number; end: number; content: string }> = [];
+  while ((match = alignRegex.exec(text)) !== null) {
+    tempParts.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      content: match[0],
+    });
+  }
 
-  while ((match = combinedRegex.exec(htmlContent)) !== null) {
-    // 添加图片之前的文本
-    if (match.index > lastIndex) {
-      const textBefore = htmlContent.substring(lastIndex, match.index);
-      if (textBefore) {
-        parts.push({ type: 'text', content: textBefore });
-      }
-    }
+  // 如果没有对齐块，直接处理原文
+  if (tempParts.length === 0) {
+    // 先渲染 LaTeX
+    const htmlContent = renderLatexToHtml(text);
 
-    if (match[0].startsWith('![')) {
-      // Markdown 图片，解析尺寸
-      const alt = match[1];
-      const url = match[2];
-      let width: number | undefined;
-      let height: number | undefined;
+    // 匹配 Markdown 图片，支持 =WxH= 尺寸语法
+    const mdImageRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+(?:=([0-9]+)x([0-9]+)=|"([^"]+)")?)?\)/gi;
+    // 匹配 HTML 图片 <img src="...">
+    const htmlImageRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
 
-      // 解析 =WxH= 格式
-      if (match[3] && match[4]) {
-        width = parseInt(match[3], 10);
-        height = parseInt(match[4], 10);
-      }
-      // 解析 "width x height" 格式
-      else if (match[5]) {
-        const dimParts = match[5].split('x');
-        if (dimParts.length === 2) {
-          width = parseInt(dimParts[0].trim(), 10);
-          height = parseInt(dimParts[1].trim(), 10);
+    const combinedRegex = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+(?:=([0-9]+)x([0-9]+)=|"([^"]+)")?)?\)|<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+
+    let imgMatch;
+    let imgLastIndex = 0;
+
+    while ((imgMatch = combinedRegex.exec(htmlContent)) !== null) {
+      if (imgMatch.index > imgLastIndex) {
+        const textBefore = htmlContent.substring(imgLastIndex, imgMatch.index);
+        if (textBefore) {
+          parts.push({ type: 'text', content: textBefore });
         }
       }
 
-      parts.push({
-        type: 'image',
-        content: match[0],
-        src: getImageUrl(url),
-        alt,
-        width,
-        height,
-      });
-      lastIndex = match.index + match[0].length;
-    } else {
-      // HTML 图片
-      const srcMatch = match[0].match(/src=["']([^"']+)["']/);
-      const altMatch = match[0].match(/alt=["']([^"']+)["']/);
-      parts.push({
-        type: 'image',
-        content: match[0],
-        src: getImageUrl(srcMatch ? srcMatch[1] : ''),
-        alt: altMatch ? altMatch[1] : '',
-      });
-      lastIndex = match.index + match[0].length;
+      if (imgMatch[0].startsWith('![')) {
+        const alt = imgMatch[1];
+        const url = imgMatch[2];
+        let width: number | undefined;
+        let height: number | undefined;
+
+        if (imgMatch[3] && imgMatch[4]) {
+          width = parseInt(imgMatch[3], 10);
+          height = parseInt(imgMatch[4], 10);
+        } else if (imgMatch[5]) {
+          const dimParts = imgMatch[5].split('x');
+          if (dimParts.length === 2) {
+            width = parseInt(dimParts[0].trim(), 10);
+            height = parseInt(dimParts[1].trim(), 10);
+          }
+        }
+
+        parts.push({
+          type: 'image',
+          content: imgMatch[0],
+          src: getImageUrl(url),
+          alt,
+          width,
+          height,
+        });
+      } else {
+        const srcMatch = imgMatch[0].match(/src=["']([^"']+)["']/);
+        const altMatch = imgMatch[0].match(/alt=["']([^"']+)["']/);
+        parts.push({
+          type: 'image',
+          content: imgMatch[0],
+          src: getImageUrl(srcMatch ? srcMatch[1] : ''),
+          alt: altMatch ? altMatch[1] : '',
+        });
+      }
+
+      imgLastIndex = imgMatch.index + imgMatch[0].length;
+    }
+
+    if (imgLastIndex < htmlContent.length) {
+      const remaining = htmlContent.substring(imgLastIndex);
+      if (remaining) {
+        parts.push({ type: 'text', content: remaining });
+      }
+    }
+
+    return parts.length > 0 ? parts : [{ type: 'text', content: htmlContent }];
+  }
+
+  // 处理包含对齐块的文本
+  let currentIndex = 0;
+  for (const block of tempParts) {
+    // 处理对齐块之前的文本
+    if (block.start > currentIndex) {
+      const textBefore = text.substring(currentIndex, block.start);
+      if (textBefore.trim()) {
+        // 递归处理这段文本
+        const beforeParts = parseContent(textBefore, getImageUrl);
+        parts.push(...beforeParts);
+      }
+    }
+
+    // 解析对齐块
+    const alignMatch = block.content.match(/:::(\w+)\n([\s\S]*?)\n:::/);
+    if (alignMatch) {
+      const alignType = alignMatch[1] as 'left' | 'center' | 'right';
+      const alignContent = alignMatch[2];
+      // 递归处理对齐块内的内容
+      const innerParts = parseContent(alignContent, getImageUrl);
+      for (const inner of innerParts) {
+        parts.push({
+          ...inner,
+          type: 'align',
+          align: alignType,
+        });
+      }
+    }
+
+    currentIndex = block.end;
+  }
+
+  // 处理最后剩余的文本
+  if (currentIndex < text.length) {
+    const remaining = text.substring(currentIndex);
+    if (remaining.trim()) {
+      const afterParts = parseContent(remaining, getImageUrl);
+      parts.push(...afterParts);
     }
   }
 
-  // 添加剩余文本
-  if (lastIndex < htmlContent.length) {
-    const remaining = htmlContent.substring(lastIndex);
-    if (remaining) {
-      parts.push({ type: 'text', content: remaining });
-    }
-  }
-
-  return parts.length > 0 ? parts : [{ type: 'text', content: htmlContent }];
+  return parts.length > 0 ? parts : [{ type: 'text', content: text }];
 }
 
 export function QuestionContent({ content, className = '' }: QuestionContentProps) {
@@ -151,19 +220,43 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
     const parts = parseContent(content, getImageUrl);
     return parts.map((part, index) => {
       if (part.type === 'image') {
+        const hasSize = part.width && part.height;
+        const imgStyle: React.CSSProperties = hasSize
+          ? {
+              width: part.width,
+              height: part.height,
+              objectFit: 'contain' as const,
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-md)',
+            }
+          : { maxWidth: '100%', height: 'auto' };
+
         return (
           <img
             key={index}
             src={part.src}
             alt={part.alt}
-            width={part.width}
-            height={part.height}
-            style={part.width ? { width: part.width, height: part.height || 'auto' } : undefined}
-            className={part.width ? '' : 'max-w-full h-auto'}
+            style={imgStyle}
             onClick={() => setModalImage({ src: part.src!, alt: part.alt || '' })}
           />
         );
       }
+
+      if (part.type === 'align') {
+        const alignStyle: React.CSSProperties = {
+          display: 'block',
+          textAlign: part.align,
+        };
+        return (
+          <div key={index} style={alignStyle}>
+            <span
+              dangerouslySetInnerHTML={{ __html: part.content }}
+              className="question-text"
+            />
+          </div>
+        );
+      }
+
       return (
         <span
           key={index}

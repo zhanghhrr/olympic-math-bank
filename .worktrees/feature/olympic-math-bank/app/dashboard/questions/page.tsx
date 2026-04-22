@@ -97,7 +97,7 @@ function KnowledgeTagTree({
               {hasChildren ? (
                 <button
                   onClick={() => onToggleExpand(node.id)}
-                  className="w-5 h-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-500"
+                  className="w-5 h-5 flex items-center justify-center rounded hover:bg-muted text-muted-foreground"
                 >
                   {isExpanded ? (
                     <ChevronDown className="w-3.5 h-3.5" />
@@ -114,8 +114,8 @@ function KnowledgeTagTree({
                 onClick={() => onSelect(node.id, getTagAndDescendantIds(node))}
                 className={`flex-1 flex items-center gap-2 px-2 py-1 rounded text-sm transition-all ${
                   isSelected
-                    ? 'bg-blue-100 text-blue-700 font-medium border border-blue-300'
-                    : 'hover:bg-gray-50 text-gray-700'
+                    ? 'bg-primary/10 text-primary font-medium border border-primary/30'
+                    : 'hover:bg-muted text-foreground'
                 }`}
               >
                 <span className="truncate">
@@ -170,10 +170,10 @@ const typeLabels: Record<string, string> = {
 };
 
 const typeColors: Record<string, string> = {
-  FILL_BLANK: 'bg-violet-50 text-violet-700 border-violet-200',
-  CHOICE: 'bg-blue-50 text-blue-700 border-blue-200',
-  SOLUTION: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  CALCULATION: 'bg-amber-50 text-amber-700 border-amber-200',
+  FILL_BLANK: 'type-fill-blank',
+  CHOICE: 'type-choice',
+  SOLUTION: 'type-solution',
+  CALCULATION: 'type-calculation',
 };
 
 const gradeLabels: Record<string, string> = {
@@ -185,11 +185,11 @@ const gradeLabels: Record<string, string> = {
   P6: '六年级',
 };
 
-const statusConfig: Record<string, { label: string; bg: string; text: string; border: string }> = {
-  DRAFT: { label: '草稿', bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-300' },
-  PENDING: { label: '待审核', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
-  APPROVED: { label: '已通过', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
-  REJECTED: { label: '已拒绝', bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200' },
+const statusConfig: Record<string, { label: string; badgeClass: string }> = {
+  DRAFT: { label: '草稿', badgeClass: 'badge-draft' },
+  PENDING: { label: '待审核', badgeClass: 'badge-pending' },
+  APPROVED: { label: '已通过', badgeClass: 'badge-approved' },
+  REJECTED: { label: '已拒绝', badgeClass: 'badge-rejected' },
 };
 
 function DifficultyStars({ level }: { level: number }) {
@@ -198,7 +198,9 @@ function DifficultyStars({ level }: { level: number }) {
       {[1, 2, 3, 4, 5].map((star) => (
         <Star
           key={star}
-          className={`w-3.5 h-3.5 ${star <= level ? 'text-amber-400 fill-amber-400' : 'text-gray-200'}`}
+          size={14}
+          className={`difficulty-star ${star <= level ? 'text-primary' : 'text-muted'}`}
+          fill={star <= level ? 'hsl(24 65% 68%)' : 'none'}
         />
       ))}
     </div>
@@ -223,24 +225,24 @@ function QuestionCard({ question }: { question: Question }) {
   };
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
+    <div className="card-elevated overflow-hidden">
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-3">
-              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${status.bg} ${status.text} ${status.border}`}>
+              <span className={`badge ${status.badgeClass}`}>
                 {status.label}
               </span>
-              <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border ${typeColor}`}>
+              <span className={`badge ${typeColor}`}>
                 {typeLabels[question.type] || question.type}
               </span>
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-muted-foreground">
                 {gradeLabels[question.grade] || question.grade}
               </span>
               <DifficultyStars level={question.difficulty} />
             </div>
 
-            <QuestionContent content={question.content} className="text-gray-900 text-base leading-relaxed" />
+            <QuestionContent content={question.content} className="text-foreground text-base leading-relaxed" />
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -248,57 +250,59 @@ function QuestionCard({ question }: { question: Question }) {
               onClick={() => setExpanded(!expanded)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 expanded
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  ? 'bg-muted text-foreground hover:bg-muted/80'
+                  : 'bg-primary/10 text-primary hover:bg-primary/20'
               }`}
             >
               <FileText className="w-4 h-4" />
-              {expanded ? '收起' : '详情'}
+              <span>{expanded ? '收起' : '详情'}</span>
               {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
-            <Link href={`/dashboard/questions/${question.id}/edit`}>
-              <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-50 text-purple-700 hover:bg-purple-100 transition-all duration-150">
-                <Edit3 className="w-4 h-4" />
-                改编
-              </button>
+            <Link
+              href={`/dashboard/questions/${question.id}/edit`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-medium bg-gradient-to-br from-primary/80 to-primary text-primary-foreground hover:opacity-90 transition-all duration-150 shadow-sm"
+              style={{ background: 'linear-gradient(135deg, hsl(24 65% 65%) 0%, hsl(24 55% 50%) 100%)' }}
+            >
+              <Edit3 className="w-4 h-4" />
+              <span>改编</span>
             </Link>
             <button
               onClick={handleCopyId}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 copied
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                  ? 'bg-success/10 text-success'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
               }`}
             >
               {copied ? (
                 <>
                   <Check className="w-4 h-4" />
-                  已复制
+                  <span>已复制</span>
                 </>
               ) : (
                 <>
                   <Copy className="w-4 h-4" />
-                  复制ID
+                  <span>复制ID</span>
                 </>
               )}
             </button>
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-100">
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
           <div className="flex items-center gap-4">
             {question.knowledgeTags && question.knowledgeTags.length > 0 ? (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">知识标签:</span>
-                <span className="text-sm text-blue-600 font-medium">
+                <span className="text-xs text-muted-foreground">知识标签:</span>
+                <span className="text-sm text-primary font-medium">
                   {getTagPathDash(question.knowledgeTags[0].knowledgeTag)}
                 </span>
               </div>
             ) : (
-              <span className="text-xs text-gray-400">未分类</span>
+              <span className="text-xs text-muted-foreground">未分类</span>
             )}
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-400">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span>创建人: {question.createdBy.name}</span>
             <span>{new Date(question.createdAt).toLocaleDateString('zh-CN')}</span>
           </div>
@@ -310,56 +314,56 @@ function QuestionCard({ question }: { question: Question }) {
           expanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'
         }`}
       >
-        <div className="px-5 pb-5 pt-0 border-t border-gray-100 bg-gray-50/50">
+        <div className="px-5 pb-5 pt-0 border-t border-border bg-muted/30">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            <div className="bg-surface rounded-lg border border-border p-4">
+              <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-success"></span>
                 答案
               </h4>
-              <QuestionContent content={question.answer || ''} className="text-gray-900 text-sm leading-relaxed" />
+              <QuestionContent content={question.answer || ''} className="text-foreground text-sm leading-relaxed" />
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+            <div className="bg-surface rounded-lg border border-border p-4">
+              <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
                 解析
               </h4>
-              <QuestionContent content={question.solution || ''} className="text-gray-900 text-sm leading-relaxed" />
+              <QuestionContent content={question.solution || ''} className="text-foreground text-sm leading-relaxed" />
             </div>
 
             {(question.source || question.competition || question.year) && (
-              <div className="bg-white rounded-lg border border-gray-200 p-4 md:col-span-2">
-                <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+              <div className="bg-surface rounded-lg border border-border p-4 md:col-span-2">
+                <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
                   来源信息
                 </h4>
                 <div className="flex flex-wrap gap-3 text-sm">
                   {question.source && (
-                    <span className="text-gray-600">
-                      <span className="font-medium text-gray-500">来源:</span> {question.source}
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-foreground">来源:</span> {question.source}
                     </span>
                   )}
                   {question.competition && (
-                    <span className="text-gray-600">
-                      <span className="font-medium text-gray-500">竞赛:</span> {question.competition}
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-foreground">竞赛:</span> {question.competition}
                     </span>
                   )}
                   {question.year && (
-                    <span className="text-gray-600">
-                      <span className="font-medium text-gray-500">年份:</span> {question.year}
+                    <span className="text-muted-foreground">
+                      <span className="font-medium text-foreground">年份:</span> {question.year}
                     </span>
                   )}
                 </div>
               </div>
             )}
 
-            <div className="bg-white rounded-lg border border-gray-200 p-4 md:col-span-2">
-              <h4 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+            <div className="bg-surface rounded-lg border border-border p-4 md:col-span-2">
+              <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground"></span>
                 题目ID
               </h4>
-              <code className="text-xs text-gray-500 font-mono bg-gray-100 px-2 py-1 rounded">
+              <code className="text-xs text-muted-foreground font-mono bg-muted px-2 py-1 rounded">
                 {question.id}
               </code>
             </div>
@@ -517,9 +521,9 @@ export default function QuestionsPage() {
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-gray-900">题目管理</h2>
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">题目管理</h2>
               <Link href="/dashboard/questions/new">
-                <Button>
+                <Button className="bg-primary hover:bg-primary-hover text-primary-foreground shadow-md hover:shadow-lg transition-all">
                   <Plus className="w-4 h-4 mr-2" />
                   新建题目
                 </Button>
@@ -527,16 +531,16 @@ export default function QuestionsPage() {
             </div>
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-48 bg-gray-100 rounded-xl animate-pulse" />
+                <div key={i} className="h-48 bg-muted rounded-xl animate-pulse" />
               ))}
             </div>
           </div>
         </div>
         {showTagSidebar && (
-          <div className="w-72 border-l border-gray-200 bg-white overflow-y-auto">
-            <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+          <div className="w-72 border-l border-border bg-surface overflow-y-auto">
+            <div className="p-4 border-b border-border sticky top-0 bg-surface z-10">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <h3 className="font-semibold text-foreground flex items-center gap-2">
                   <TreeDeciduous className="w-4 h-4" />
                   知识标签树
                 </h3>
@@ -568,11 +572,11 @@ export default function QuestionsPage() {
           {/* 页面标题 */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-bold text-gray-900">题目管理</h2>
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">题目管理</h2>
               {selectedTagId && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-full text-sm">
-                  <span className="text-blue-600">标签筛选:</span>
-                  <span className="text-blue-700 font-medium">
+                <div className="flex items-center gap-2 px-3 py-1 bg-primary/10 rounded-full text-sm">
+                  <span className="text-primary">标签筛选:</span>
+                  <span className="text-primary font-medium">
                     {tagTree && (() => {
                       const findName = (nodes: KnowledgeTagTreeNode[], id: string): string | null => {
                         for (const node of nodes) {
@@ -587,7 +591,7 @@ export default function QuestionsPage() {
                       return findName(tagTree, selectedTagId);
                     })()}
                   </span>
-                  <button onClick={handleClearTagFilter} className="text-blue-500 hover:text-blue-700">
+                  <button onClick={handleClearTagFilter} className="text-primary/60 hover:text-primary">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -598,13 +602,13 @@ export default function QuestionsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowTagSidebar(!showTagSidebar)}
-                className={showTagSidebar ? 'bg-blue-50' : ''}
+                className={showTagSidebar ? 'border-primary/30 bg-primary/5 text-primary' : ''}
               >
                 <TreeDeciduous className="w-4 h-4 mr-2" />
                 知识标签
               </Button>
               <Link href="/dashboard/questions/new">
-                <Button>
+                <Button className="bg-primary hover:bg-primary-hover text-primary-foreground shadow-md hover:shadow-lg transition-all">
                   <Plus className="w-4 h-4 mr-2" />
                   新建题目
                 </Button>
@@ -613,21 +617,22 @@ export default function QuestionsPage() {
           </div>
 
           {/* 搜索和筛选区域 */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="card-elevated p-4">
             <div className="flex gap-4 items-center">
               <div className="flex-1 flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
                   <input
                     type="text"
                     placeholder="搜索题目内容..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                    className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="input-field pl-10 pr-4 w-full"
+                    style={{ minWidth: 0, paddingLeft: '2.75rem' }}
                   />
                 </div>
-                <Button variant="outline" onClick={handleSearch}>
+                <Button variant="outline" onClick={handleSearch} className="border-border hover:bg-muted">
                   搜索
                 </Button>
               </div>
@@ -635,14 +640,14 @@ export default function QuestionsPage() {
                 onClick={() => setShowFilters(!showFilters)}
                 className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
                   showFilters || (filter.status || filter.grade || filter.type)
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+                    ? 'bg-primary/10 text-primary border border-primary/30'
+                    : 'bg-muted text-muted-foreground border border-transparent hover:bg-muted/80'
                 }`}
               >
                 <Filter className="w-4 h-4" />
                 筛选
                 {(filter.status || filter.grade || filter.type) && (
-                  <span className="w-5 h-5 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center">
+                  <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
                     {(filter.status ? 1 : 0) + (filter.grade ? 1 : 0) + (filter.type ? 1 : 0)}
                   </span>
                 )}
@@ -650,13 +655,13 @@ export default function QuestionsPage() {
             </div>
 
             {showFilters && (
-              <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-4">
+              <div className="mt-4 pt-4 border-t border-border grid grid-cols-3 gap-4 items-end">
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">状态</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">状态</label>
                   <select
                     value={filter.status}
                     onChange={(e) => { setFilter({ ...filter, status: e.target.value }); }}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="select-field select-field-full"
                   >
                     <option value="">全部</option>
                     <option value="DRAFT">草稿</option>
@@ -666,11 +671,11 @@ export default function QuestionsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">年级</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">年级</label>
                   <select
                     value={filter.grade}
                     onChange={(e) => { setFilter({ ...filter, grade: e.target.value }); }}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="select-field select-field-full"
                   >
                     <option value="">全部</option>
                     <option value="P1">一年级</option>
@@ -682,11 +687,11 @@ export default function QuestionsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1.5">题型</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">题型</label>
                   <select
                     value={filter.type}
                     onChange={(e) => { setFilter({ ...filter, type: e.target.value }); }}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="select-field select-field-full"
                   >
                     <option value="">全部</option>
                     <option value="FILL_BLANK">填空题</option>
@@ -700,11 +705,11 @@ export default function QuestionsPage() {
                     variant="ghost"
                     size="sm"
                     onClick={() => { setFilter({ status: '', grade: '', type: '' }); }}
-                    className="text-gray-500"
+                    className="text-muted-foreground hover:text-foreground"
                   >
                     重置
                   </Button>
-                  <Button size="sm" onClick={() => { setShowFilters(false); }}>
+                  <Button size="sm" onClick={() => { setShowFilters(false); }} className="bg-primary hover:bg-primary-hover text-primary-foreground">
                     应用筛选
                   </Button>
                 </div>
@@ -715,16 +720,16 @@ export default function QuestionsPage() {
           {/* 题目列表 */}
           <div className="space-y-4">
             {questions.length === 0 ? (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
-                  <FileText className="w-8 h-8 text-gray-400" />
+              <div className="card-elevated p-12 text-center">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-muted flex items-center justify-center">
+                  <FileText className="w-8 h-8 text-muted-foreground" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-1">暂无题目</h3>
-                <p className="text-gray-500 text-sm mb-4">
+                <h3 className="text-lg font-semibold text-foreground mb-1">暂无题目</h3>
+                <p className="text-muted-foreground text-sm mb-4">
                   {selectedTagId ? '该标签下暂无题目' : '点击下方按钮添加第一道题目'}
                 </p>
                 <Link href="/dashboard/questions/new">
-                  <Button>
+                  <Button className="bg-primary hover:bg-primary-hover text-primary-foreground shadow-md hover:shadow-lg transition-all">
                     <Plus className="w-4 h-4 mr-2" />
                     新建题目
                   </Button>
@@ -732,9 +737,9 @@ export default function QuestionsPage() {
               </div>
             ) : (
               <>
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-muted-foreground">
                   共 {totalCount} 道题目
-                  {selectedTagId && <span className="text-blue-600 ml-2">(已按标签筛选)</span>}
+                  {selectedTagId && <span className="text-primary ml-2">(已按标签筛选)</span>}
                 </div>
                 {questions.map((question) => (
                   <QuestionCard key={question.id} question={question} />
@@ -747,34 +752,34 @@ export default function QuestionsPage() {
 
       {/* 右侧知识标签树边栏 */}
       {showTagSidebar && (
-        <div className="w-72 border-l border-gray-200 bg-white overflow-y-auto">
-          <div className="p-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+        <div className="w-72 border-l border-border bg-surface overflow-y-auto">
+          <div className="p-4 border-b border-border sticky top-0 bg-surface z-10">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+              <h3 className="font-semibold text-foreground flex items-center gap-2">
                 <TreeDeciduous className="w-4 h-4" />
                 知识标签树
               </h3>
               <button
                 onClick={() => setShowTagSidebar(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-muted-foreground hover:text-foreground"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
             {/* 标签搜索框 */}
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none z-10" />
               <input
                 type="text"
                 placeholder="搜索标签..."
                 value={tagSearch}
                 onChange={(e) => setTagSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full pl-9 pr-3 py-1.5 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
               {tagSearch && (
                 <button
                   onClick={() => setTagSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -783,7 +788,7 @@ export default function QuestionsPage() {
             {selectedTagId && (
               <button
                 onClick={handleClearTagFilter}
-                className="mt-2 text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                className="mt-2 text-sm text-primary hover:text-primary/80 flex items-center gap-1"
               >
                 <X className="w-3 h-3" />
                 清除标签筛选
@@ -801,7 +806,7 @@ export default function QuestionsPage() {
                 searchText={tagSearch}
               />
             ) : (
-              <p className="text-sm text-gray-500 text-center py-4">{tagSearch ? '未找到匹配的标签' : '暂无标签数据'}</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{tagSearch ? '未找到匹配的标签' : '暂无标签数据'}</p>
             )}
           </div>
         </div>
