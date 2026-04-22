@@ -43,3 +43,6 @@ next-env.d.ts
 # database
 *.db
 *.db-journal
+# but keep dev.db for demonstration
+!lib/db/dev.db
+!lib/db/*.db
