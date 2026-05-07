@@ -49,54 +49,280 @@ const latexButtons = [
 export function LatexToolbar({ onInsert, onLatexInsert, showImageButton = false }: LatexToolbarProps) {
   // 处理文本格式化（加粗或段落对齐）
   const handleTextFormat = (type: WrapType) => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      return;
-    }
-
-    const selectedText = selection.toString().trim();
-    if (!selectedText) {
-      return;
-    }
-
     if (type === 'bold') {
       // 加粗：用 ** 包裹选中文本
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return;
+      const selectedText = selection.toString().trim();
+      if (!selectedText) return;
       const wrappedText = `**${selectedText}**`;
       document.execCommand('insertText', false, wrappedText);
-    } else {
-      // 段落对齐：找到选中文本所在的段落，整个段落用对齐标记包裹
-      const range = selection.getRangeAt(0);
-      
-      // 找到段落元素（向上查找 div 或 p）
-      let paragraphNode: Node | null = range.commonAncestorContainer;
-      
-      // 如果当前节点是文本节点，找到其父元素
-      if (paragraphNode.nodeType === Node.TEXT_NODE) {
-        paragraphNode = paragraphNode.parentElement;
+      return;
+    }
+
+    // 对齐操作：直接操作 DOM 而不是插入 markdown 标记
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    const startNode = range.startContainer;
+
+    // 查找是否有点中的图片（检查是否有 .image-wrapper 被选中）
+    const selectedImageWrapper = (() => {
+      // 检查选中的内容是否包含图片
+      const rangeClone = range.cloneRange();
+      rangeClone.collapse(true);
+      // 尝试找到图片 wrapper
+      let node: Node | null = startNode;
+      while (node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node as HTMLElement;
+          if (el.classList?.contains('image-wrapper')) {
+            return el;
+          }
+          // 检查是否有被选中的图片
+          if (el.tagName === 'IMG' && el.closest('.image-wrapper')) {
+            return el.closest('.image-wrapper') as HTMLElement;
+          }
+        }
+        node = node.parentNode;
       }
-      
-      // 向上查找最近的块级元素
-      while (paragraphNode && paragraphNode.nodeName !== 'DIV' && paragraphNode.nodeName !== 'P') {
-        paragraphNode = paragraphNode.parentElement;
+      // 检查 selection 是否包含图片
+      if (selection.toString().includes('<img')) {
+        const imgMatch = selection.toString().match(/<img[^>]*>/);
+        if (imgMatch) {
+          // 查找页面中的图片
+          const allWrappers = document.querySelectorAll('.image-wrapper');
+          for (const wrapper of allWrappers) {
+            if (wrapper.innerHTML.includes(imgMatch[0])) {
+              return wrapper as HTMLElement;
+            }
+          }
+        }
       }
-      
-      if (!paragraphNode) {
-        paragraphNode = range.commonAncestorContainer;
+      return null;
+    })();
+
+    // 如果有图片被选中，设置图片对齐
+    if (selectedImageWrapper) {
+      // 先检查图片是否已经在 align-wrapper 内部
+      const parentAlignWrapper = selectedImageWrapper.closest('.align-wrapper') as HTMLElement | null;
+
+      if (parentAlignWrapper) {
+        // 图片已在 align-wrapper 内，只更新外层对齐
+        const currentAlign = parentAlignWrapper.getAttribute('data-align') || 'left';
+        if (currentAlign !== type) {
+          parentAlignWrapper.setAttribute('data-align', type);
+          parentAlignWrapper.style.textAlign = type;
+          parentAlignWrapper.style.borderColor = type === 'left' ? '#3b82f6' : type === 'center' ? '#8b5cf6' : '#ef4444';
+          const labelEl = parentAlignWrapper.querySelector('div[style*="position:absolute"]');
+          if (labelEl) {
+            labelEl.textContent = type === 'left' ? '居左' : type === 'center' ? '居中' : '居右';
+          }
+        }
+        return;
       }
 
-      // 获取段落文本内容
-      const paragraphText = paragraphNode.textContent || '';
-      
-      // 构建对齐格式：:::type\n段落内容\n:::
-      const alignStart = `:::${type}\n`;
-      const alignEnd = `\n:::`;
-      
-      // 替换整个段落内容为带对齐标记的文本
-      const wrappedText = alignStart + paragraphText + alignEnd;
-      
-      // 使用 insertText 插入（会替换选中文本）
-      document.execCommand('insertText', false, wrappedText);
+      const currentAlign = selectedImageWrapper.getAttribute('data-align') || 'center';
+      if (currentAlign !== type) {
+        // 创建对齐块
+        const alignDiv = createAlignDiv(type);
+        const contentDiv = alignDiv.querySelector('.align-content')!;
+
+        // 更新图片的对齐属性
+        selectedImageWrapper.setAttribute('data-align', type);
+
+        // 从 DOM 中移除图片
+        const parent = selectedImageWrapper.parentNode;
+        if (parent) {
+          parent.removeChild(selectedImageWrapper);
+        }
+
+        // 把图片移入对齐块
+        contentDiv.appendChild(selectedImageWrapper);
+
+        // 把对齐块插入到原来图片的位置
+        if (parent) {
+          parent.appendChild(alignDiv);
+        }
+
+        // 将光标移到对齐块内
+        const finalRange = document.createRange();
+        finalRange.setStart(contentDiv, 0);
+        finalRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(finalRange);
+      }
+      return;
     }
+
+    // 查找光标所在的 align-wrapper 或 image-wrapper
+    let node: Node | null = startNode;
+    while (node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        if (el.classList?.contains('align-wrapper')) {
+          // 找到了对齐块，修改对齐
+          const currentAlign = el.getAttribute('data-align') || 'left';
+          if (currentAlign !== type) {
+            el.setAttribute('data-align', type);
+            // 更新样式
+            el.style.textAlign = type;
+            el.style.borderColor = type === 'left' ? '#3b82f6' : type === 'center' ? '#8b5cf6' : '#ef4444';
+            // 更新标签
+            const labelEl = el.querySelector('div[style*="position:absolute"]');
+            if (labelEl) {
+              labelEl.textContent = type === 'left' ? '居左' : type === 'center' ? '居中' : '居右';
+            }
+          }
+          return;
+        }
+      }
+      node = node.parentNode;
+    }
+
+    // 如果都没找到，在光标位置插入新的对齐块 DOM 元素
+    // 但先检查光标所在行是否有图片，如果有，把该图片移入对齐块
+    const currentRange = selection.getRangeAt(0);
+    const startContainer = currentRange.startContainer;
+
+    // 找到光标所在行内最近的 image-wrapper
+    let lineNode: Node | null = startContainer;
+    let imageWrapper: HTMLElement | null = null;
+
+    // 在同级节点中向前找 image-wrapper
+    while (lineNode && lineNode.previousSibling) {
+      const prev: Node | null = lineNode.previousSibling;
+      if (prev.nodeType === Node.ELEMENT_NODE) {
+        const el = prev as HTMLElement;
+        if (el.classList?.contains('image-wrapper')) {
+          imageWrapper = el;
+          break;
+        }
+      }
+      lineNode = prev;
+    }
+
+    // 如果向前没找到，向后找
+    if (!imageWrapper && startContainer.parentNode) {
+      const parent = startContainer.parentNode;
+      if (parent.nodeType === Node.ELEMENT_NODE) {
+        const next = (parent as HTMLElement).nextElementSibling;
+        if (next?.classList?.contains('image-wrapper')) {
+          imageWrapper = next as HTMLElement;
+        }
+      }
+    }
+
+    // 如果找到了 image-wrapper，用对齐块包裹它
+    if (imageWrapper) {
+      const alignDiv = createAlignDiv(type);
+      const contentDiv = alignDiv.querySelector('.align-content')!;
+
+      // 把图片移入对齐块
+      if (imageWrapper.parentNode) {
+        imageWrapper.parentNode.insertBefore(alignDiv, imageWrapper);
+        contentDiv.appendChild(imageWrapper);
+      }
+
+      // 将光标移到对齐块内
+      const finalRange = document.createRange();
+      finalRange.setStart(contentDiv, 0);
+      finalRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(finalRange);
+      return;
+    }
+
+    // 找到当前行（段落）的起始和结束位置
+    let lineStart: Node = startContainer;
+    let lineEnd: Node = startContainer;
+
+    // 向前找行的开始（遇到块级元素或内容开头为止）
+    while (lineStart.previousSibling) {
+      const prev = lineStart.previousSibling;
+      if (prev.nodeType === Node.ELEMENT_NODE) {
+        const el = prev as HTMLElement;
+        // 块级元素是行的分隔
+        if (el.tagName === 'DIV' || el.tagName === 'P' || el.tagName === 'BR') {
+          break;
+        }
+      }
+      lineStart = prev;
+    }
+
+    // 向后找行的结束
+    while (lineEnd.nextSibling) {
+      const next = lineEnd.nextSibling;
+      if (next.nodeType === Node.ELEMENT_NODE) {
+        const el = next as HTMLElement;
+        if (el.tagName === 'DIV' || el.tagName === 'P' || el.tagName === 'BR') {
+          break;
+        }
+      }
+      lineEnd = next;
+    }
+
+    // 创建覆盖整行的范围
+    const lineRange = document.createRange();
+    lineRange.setStartBefore(lineStart);
+    lineRange.setEndAfter(lineEnd);
+
+    const selectedText = lineRange.toString();
+
+    // 如果没有有效内容，插入空对齐块
+    if (!selectedText.trim()) {
+      const alignDiv = createAlignDiv(type);
+      currentRange.insertNode(alignDiv);
+      const emptyRange = document.createRange();
+      emptyRange.setStart(alignDiv.querySelector('.align-content')!, 0);
+      emptyRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(emptyRange);
+      return;
+    }
+
+    // 用对齐块包裹整行
+    const alignDiv = createAlignDiv(type);
+    const contentDiv = alignDiv.querySelector('.align-content')!;
+
+    const fragment = lineRange.extractContents();
+    contentDiv.appendChild(fragment);
+
+    lineRange.insertNode(alignDiv);
+
+    // 将光标移到对齐块内
+    const finalRange = document.createRange();
+    finalRange.setStart(contentDiv, 0);
+    finalRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(finalRange);
+  };
+
+  // 创建对齐块 DOM 元素的辅助函数
+  function createAlignDiv(type: WrapType): HTMLDivElement {
+    const alignDiv = document.createElement('div');
+    alignDiv.className = 'align-wrapper';
+    alignDiv.setAttribute('data-align', type);
+    alignDiv.setAttribute('contentEditable', 'true');
+    alignDiv.setAttribute('spellcheck', 'false');
+
+    const labelDiv = document.createElement('div');
+    labelDiv.style.cssText = 'position:absolute;top:-10px;left:8px;background:#fff;padding:0 6px;font-size:11px;color:#64748b;border-radius:3px;';
+    labelDiv.textContent = type === 'left' ? '居左' : type === 'center' ? '居中' : '居右';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'align-content';
+    contentDiv.setAttribute('contentEditable', 'true');
+    contentDiv.style.cssText = `outline:none;text-align:${type};`;
+
+    const textColor = type === 'left' ? '#3b82f6' : type === 'center' ? '#8b5cf6' : '#ef4444';
+    alignDiv.style.cssText = `display:block;text-align:${type};background:#f0f9ff;border:2px solid ${textColor};padding:8px 12px;border-radius:6px;margin:8px 0;min-width:100px;position:relative;`;
+
+    alignDiv.appendChild(labelDiv);
+    alignDiv.appendChild(contentDiv);
+
+    return alignDiv;
   };
 
   const handleClick = (insert: string, isImage?: boolean) => {

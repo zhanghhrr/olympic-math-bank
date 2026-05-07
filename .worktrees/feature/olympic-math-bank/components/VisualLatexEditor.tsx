@@ -37,7 +37,7 @@ function parseMarkdownToSegments(markdown: string): Segment[] {
   const allItems: { start: number; end: number; segment: Segment }[] = [];
 
   // 对齐块正则：:::left\n内容\n:::
-  const alignRegex = /:::(\w+)\n([\s\S]*?)\n:::/g;
+  const alignRegex = /:::(\w+)\r?\n([\s\S]*?)\r?\n:::/g;
   const imageRegexWithSize = /!\[([^\]]*)\]\(([^)]+?)\s*=\s*(\d+)\s*x\s*(\d+)\s*=\)/g;
   const imageRegexWithoutSize = /!\[([^\]]*)\]\(([^)]+?)\)/g;
 
@@ -258,9 +258,50 @@ function renderEditHtml(segments: Segment[], baseUrl: string): string {
                           seg.align === 'right' ? 'margin: 8px 0 8px auto; display: block;' : 'margin: 8px 0; display: block;';
         return `${needLeadingBreak ? '<br>' : ''}<span class="image-wrapper" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="position:relative;${alignStyle}width:${seg.width}px;height:${seg.height}px;"><img src="${imgUrl}" alt="${seg.alt}" style="width:100%;height:100%;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" /><span class="resize-handle" contentEditable="false" style="position:absolute;bottom:0;right:0;width:24px;height:24px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;z-index:10;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>${needTrailingBreak ? '<br>' : ''}`;
       case 'align':
-        // 编辑模式下对齐块显示为纯文本源码
-        const alignText = `:::${seg.align}\n${seg.content}\n:::`;
-        return `${needLeadingBreak ? '<br>' : ''}<span class="align-source" data-align="${seg.align}" style="display:block;font-family:monospace;background:#e8f4ea;padding:4px 8px;border-radius:4px;color:#16a34a;margin:8px 0;white-space:pre-wrap;">${alignText}</span>${needTrailingBreak ? '<br>' : ''}`;
+        // 编辑模式下对齐块显示为可视化可编辑区域，带边框和背景标识
+        const alignTextStyleMap: Record<string, string> = {
+          left: 'text-align:left;',
+          center: 'text-align:center;',
+          right: 'text-align:right;',
+        };
+        const alignBgMap: Record<string, string> = {
+          left: 'background:#f0f9ff;border-color:#3b82f6;',
+          center: 'background:#f0f9ff;border-color:#8b5cf6;',
+          right: 'background:#f0f9ff;border-color:#ef4444;',
+        };
+        const alignLabelMap: Record<string, string> = {
+          left: '居左',
+          center: '居中',
+          right: '居右',
+        };
+        const alignTextStyle = alignTextStyleMap[seg.align] || 'text-align:left;';
+        const alignBg = alignBgMap[seg.align] || '';
+        const alignLabel = alignLabelMap[seg.align] || '居左';
+        // 将内容解析为HTML以便在 contenteditable 中渲染
+        const innerHtml = renderInnerHtml(seg.content, baseUrl);
+        return `${needLeadingBreak ? '<br>' : ''}<div class="align-wrapper" data-align="${seg.align}" contentEditable="true" spellcheck="false" style="display:block;${alignTextStyle}${alignBg}padding:8px 12px;border-radius:6px;border:2px solid transparent;margin:8px 0;min-width:100px;position:relative;"><div style="position:absolute;top:-10px;left:8px;background:#fff;padding:0 6px;font-size:11px;color:#64748b;border-radius:3px;">${alignLabel}</div><div class="align-content" style="outline:none;${alignTextStyle}">${innerHtml}</div></div>${needTrailingBreak ? '<br>' : ''}`;
+    }
+  }).join('');
+}
+
+// 渲染对齐块内部内容为 HTML（递归处理内部的分段）
+function renderInnerHtml(content: string, baseUrl: string): string {
+  const segments = parseMarkdownToSegments(content);
+  return segments.map(seg => {
+    switch (seg.type) {
+      case 'text':
+        return seg.content.replace(/\n/g, '<br>');
+      case 'latex':
+        const latexText = seg.displayMode ? `$$${seg.content}$$` : `$${seg.content}$`;
+        const latexStyle = seg.displayMode
+          ? 'display:block;font-family:monospace;background:#f3f4f6;padding:4px 8px;border-radius:4px;color:#7c3aed;margin:4px 0;white-space:pre-wrap;'
+          : 'font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;white-space:pre-wrap;';
+        return `<span class="latex-source" data-latex="${seg.content}" data-mode="${seg.displayMode ? 'display' : 'inline'}" style="${latexStyle}">${latexText}</span>`;
+      case 'image':
+        const imgUrl = getImageUrl(seg.url, baseUrl);
+        return `<span class="image-wrapper" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="position:relative;display:inline-block;margin:4px;"><img src="${imgUrl}" alt="${seg.alt}" style="width:${seg.width}px;height:${seg.height}px;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" /><span class="resize-handle" contentEditable="false" style="position:absolute;bottom:0;right:0;width:20px;height:20px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;z-index:10;"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>`;
+      default:
+        return seg.content;
     }
   }).join('');
 }
@@ -292,8 +333,30 @@ function renderPreviewHtml(segments: Segment[], baseUrl: string): string {
         const imgHeightStyle = seg.height > 0 ? `height:${seg.height}px;` : '';
         return `${needLeadingBreak ? '<br>' : ''}<span style="${alignStyle}${imgWidthStyle}${imgHeightStyle}"><img src="${imgUrl}" alt="${seg.alt}" style="${imgWidthStyle}${imgHeightStyle}object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" class="preview-image" /></span>${needTrailingBreak ? '<br>' : ''}`;
       case 'align':
-        const textAlignStyle = `text-align:${seg.align};`;
-        return `<div style="${textAlignStyle}display:block;margin:8px 0;">${seg.content.replace(/\n/g, '<br>')}</div>`;
+        // 解析对齐块内部内容并渲染为预览 HTML
+        const innerSegments = parseMarkdownToSegments(seg.content);
+        const innerHtml = innerSegments.map(innerSeg => {
+          switch (innerSeg.type) {
+            case 'text':
+              return innerSeg.content.replace(/\n/g, '<br>');
+            case 'latex':
+              if (innerSeg.displayMode) {
+                return `<div class="latex-display" style="margin:12px 0;">${renderLatex(innerSeg.content, true)}</div>`;
+              }
+              return `<span class="latex-inline">${renderLatex(innerSeg.content, false)}</span>`;
+            case 'image':
+              const innerImgUrl = getImageUrl(innerSeg.url, baseUrl);
+              const innerImgWidthStyle = innerSeg.width > 0 ? `width:${innerSeg.width}px;` : '';
+              const innerImgHeightStyle = innerSeg.height > 0 ? `height:${innerSeg.height}px;` : '';
+              // 图片在 align-wrapper 内时，不需要自己的 margin 样式，外层 div 的 text-align 会控制位置
+              // 只有独立图片才需要 margin 样式
+              return `<img src="${innerImgUrl}" alt="${innerSeg.alt}" style="${innerImgWidthStyle}${innerImgHeightStyle}object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" class="preview-image" />`;
+            default:
+              return innerSeg.content;
+          }
+        }).join('');
+        const flexJustify = seg.align === 'center' ? 'center' : seg.align === 'right' ? 'flex-end' : 'flex-start';
+        return `<div style="display:flex;justify-content:${flexJustify};margin:8px 0;">${innerHtml}</div>`;
     }
   }).join('');
 }
@@ -334,13 +397,15 @@ export function VisualLatexEditor({
     if (!isEditing) return;
 
     // 使用 requestAnimationFrame 确保 DOM 已经渲染
-    requestAnimationFrame(() => {
-      if (editorRef.current && editorRef.current.innerHTML === '') {
-        editorRef.current.innerHTML = renderEditHtml(segments, baseUrl);
+    const timer = requestAnimationFrame(() => {
+      if (editorRef.current) {
+        const html = renderEditHtml(segments, baseUrl);
+        editorRef.current.innerHTML = html;
         editorInitializedRef.current = true;
       }
     });
-  }, [isEditing]);
+    return () => cancelAnimationFrame(timer);
+  }, [isEditing, segments, baseUrl]);
 
   // 进入编辑模式
   const enterEditMode = useCallback(() => {
@@ -389,6 +454,64 @@ export function VisualLatexEditor({
     // 内容会在 leaveEditMode 时统一解析
   }, []);
 
+  // 处理对齐块内部节点的辅助函数
+  const processNodeForAlign = (node: Node, segments: Segment[]): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || '';
+      if (text.trim()) {
+        parseTextAndLatex(text, segments);
+      } else if (text.includes('\n')) {
+        // 纯换行文本也添加
+        segments.push({ type: 'text', content: '\n' });
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as HTMLElement;
+
+      if (el.classList.contains('latex-source')) {
+        const storedLatex = el.getAttribute('data-latex') || '';
+        const mode = el.getAttribute('data-mode') || 'inline';
+        const isDisplay = mode === 'display';
+        const displayText = el.textContent || '';
+        const displayTrimmed = displayText.replace(/^\$\$|\$\$$/g, '');
+        let latexContent = storedLatex;
+
+        if (displayTrimmed !== storedLatex) {
+          if (displayText.startsWith('$$') && displayText.endsWith('$$')) {
+            latexContent = displayText.slice(2, -2);
+          } else if (displayText.startsWith('$') && displayText.endsWith('$')) {
+            latexContent = displayText.slice(1, -1);
+          }
+        }
+
+        if (latexContent.trim()) {
+          segments.push({ type: 'latex', content: latexContent, displayMode: isDisplay });
+        }
+      } else if (el.classList.contains('image-wrapper')) {
+        const url = el.getAttribute('data-url') || '';
+        const alt = el.getAttribute('data-alt') || '';
+        const width = parseInt(el.getAttribute('data-width') || '200');
+        const height = parseInt(el.getAttribute('data-height') || '150');
+        const align = (el.getAttribute('data-align') || 'center') as 'left' | 'center' | 'right';
+        segments.push({ type: 'image', url, alt, width, height, aspectRatio: height / width, align });
+      } else if (el.tagName === 'BR') {
+        segments.push({ type: 'text', content: '\n' });
+      } else if (el.tagName === 'P' || el.tagName === 'DIV') {
+        // 块级元素前添加换行（如果前面不是换行）
+        const lastSeg = segments.length > 0 ? segments[segments.length - 1] : null;
+        if (!lastSeg || (lastSeg.type !== 'text' || !lastSeg.content.endsWith('\n'))) {
+          segments.push({ type: 'text', content: '\n' });
+        }
+        // 递归处理子节点
+        el.childNodes.forEach((child: Node) => processNodeForAlign(child, segments));
+        // 块级元素后添加换行
+        segments.push({ type: 'text', content: '\n' });
+      } else {
+        // 递归处理其他元素
+        el.childNodes.forEach((child: Node) => processNodeForAlign(child, segments));
+      }
+    }
+  };
+
   // 解析 editor HTML 为 segments - 按 DOM 顺序解析
   const parseEditorHtml = (html: string): Segment[] => {
     const segments: Segment[] = [];
@@ -407,10 +530,25 @@ export function VisualLatexEditor({
         const el = node as HTMLElement;
 
         if (el.classList.contains('latex-source')) {
-          // 直接从 data-latex 属性提取 LaTeX 内容（比 textContent 更可靠）
-          const latexContent = el.getAttribute('data-latex') || '';
+          // 直接从 data-latex 属性提取 LaTeX 内容
+          const storedLatex = el.getAttribute('data-latex') || '';
           const mode = el.getAttribute('data-mode') || 'inline';
           const isDisplay = mode === 'display';
+          // 获取显示的文本内容
+          const displayText = el.textContent || '';
+          // 判断显示内容是否被用户编辑过（与 data-latex 不一致）
+          // 显示内容的格式是 $content$ 或 $$content$$
+          const displayTrimmed = displayText.replace(/^\$\$|\$\$$/g, '');
+          let latexContent = storedLatex;
+
+          if (displayTrimmed !== storedLatex) {
+            // 用户编辑了 LaTeX 内容，使用显示内容去掉 $ 后的值
+            if (displayText.startsWith('$$') && displayText.endsWith('$$')) {
+              latexContent = displayText.slice(2, -2);
+            } else if (displayText.startsWith('$') && displayText.endsWith('$')) {
+              latexContent = displayText.slice(1, -1);
+            }
+          }
 
           if (latexContent.trim()) {
             segments.push({ type: 'latex', content: latexContent, displayMode: isDisplay });
@@ -424,6 +562,44 @@ export function VisualLatexEditor({
           segments.push({ type: 'image', url, alt, width, height, aspectRatio: height / width, align });
         } else if (el.classList.contains('image-wrapper') && el.querySelector('img')) {
           // 已经在上面处理了
+        } else if (el.classList.contains('align-source')) {
+          // 对齐块显示为纯文本，提取格式内容
+          const content = el.textContent || '';
+          const align = (el.getAttribute('data-align') || 'left') as 'left' | 'center' | 'right';
+          // 从显示文本中提取原始格式内容（:::align\n内容\n:::）
+          const match = content.match(/:::(\w+)\n([\s\S]*?)\n:::/);
+          if (match) {
+            segments.push({ type: 'align', align: match[1] as 'left' | 'center' | 'right', content: match[2] });
+          } else if (content.trim()) {
+            // 如果格式被破坏，当作普通文本处理
+            parseTextAndLatex(content, segments);
+          }
+        } else if (el.classList.contains('align-wrapper')) {
+          // 对齐块显示为 contenteditable 可视化区域
+          const align = (el.getAttribute('data-align') || 'left') as 'left' | 'center' | 'right';
+          // 从 innerHTML 提取内容（内部可能有 latex-source、image-wrapper 等）
+          const innerDiv = el.querySelector('.align-content');
+          if (innerDiv) {
+            // 递归处理内部内容
+            const innerSegments: Segment[] = [];
+            innerDiv.childNodes.forEach((child: Node) => {
+              processNodeForAlign(child, innerSegments);
+            });
+            // 将内部 segments 合并为 markdown 内容
+            // 确保内容不为空，否则使用空格
+            const innerContent = innerSegments.length > 0
+              ? segmentsToMarkdown(innerSegments)
+              : ' ';
+            segments.push({ type: 'align', align, content: innerContent });
+          } else {
+            // fallback: 使用 textContent
+            const content = el.textContent || '';
+            // 去掉标签名
+            const cleanContent = content.replace(/^(居左|居中|居右)/, '').trim();
+            if (cleanContent) {
+              segments.push({ type: 'align', align, content: cleanContent });
+            }
+          }
         } else if (el.tagName === 'BR') {
           // 换行符处理为空文本
           segments.push({ type: 'text', content: '\n' });
@@ -437,18 +613,6 @@ export function VisualLatexEditor({
           el.childNodes.forEach(processNode);
           // 块级元素后加换行
           segments.push({ type: 'text', content: '\n' });
-        } else if (el.classList.contains('align-source')) {
-          // 对齐块显示为纯文本，提取格式内容
-          const content = el.textContent || '';
-          const align = (el.getAttribute('data-align') || 'left') as 'left' | 'center' | 'right';
-          // 从显示文本中提取原始格式内容（:::align\n内容\n:::）
-          const match = content.match(/:::(\w+)\n([\s\S]*?)\n:::/);
-          if (match) {
-            segments.push({ type: 'align', align: match[1] as 'left' | 'center' | 'right', content: match[2] });
-          } else if (content.trim()) {
-            // 如果格式被破坏，当作普通文本处理
-            parseTextAndLatex(content, segments);
-          }
         } else {
           // 递归处理其他元素
           el.childNodes.forEach(processNode);

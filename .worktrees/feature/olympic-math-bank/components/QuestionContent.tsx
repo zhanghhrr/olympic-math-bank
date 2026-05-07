@@ -82,7 +82,7 @@ function parseContent(text: string, getImageUrl: (path: string) => string): Arra
 
   // 先解析对齐块 :::left/center/right ... :::
   // 匹配 :::left\n内容\n:::
-  const alignRegex = /:::(\w+)\n([\s\S]*?)\n:::/g;
+  const alignRegex = /:::(\w+)\r?\n([\s\S]*?)\r?\n:::/g;
   let lastIndex = 0;
   let match;
 
@@ -182,7 +182,7 @@ function parseContent(text: string, getImageUrl: (path: string) => string): Arra
     }
 
     // 解析对齐块
-    const alignMatch = block.content.match(/:::(\w+)\n([\s\S]*?)\n:::/);
+    const alignMatch = block.content.match(/:::(\w+)\r?\n([\s\S]*?)\r?\n:::/);
     if (alignMatch) {
       const alignType = alignMatch[1] as 'left' | 'center' | 'right';
       const alignContent = alignMatch[2];
@@ -191,7 +191,6 @@ function parseContent(text: string, getImageUrl: (path: string) => string): Arra
       for (const inner of innerParts) {
         parts.push({
           ...inner,
-          type: 'align',
           align: alignType,
         });
       }
@@ -219,6 +218,8 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
   const renderedContent = useMemo(() => {
     const parts = parseContent(content, getImageUrl);
     return parts.map((part, index) => {
+      let element: React.ReactNode;
+
       if (part.type === 'image') {
         const hasSize = part.width && part.height;
         const imgStyle: React.CSSProperties = hasSize
@@ -231,7 +232,7 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
             }
           : { maxWidth: '100%', height: 'auto' };
 
-        return (
+        element = (
           <img
             key={index}
             src={part.src}
@@ -240,30 +241,28 @@ export function QuestionContent({ content, className = '' }: QuestionContentProp
             onClick={() => setModalImage({ src: part.src!, alt: part.alt || '' })}
           />
         );
-      }
-
-      if (part.type === 'align') {
-        const alignStyle: React.CSSProperties = {
-          display: 'block',
-          textAlign: part.align,
-        };
-        return (
-          <div key={index} style={alignStyle}>
-            <span
-              dangerouslySetInnerHTML={{ __html: part.content }}
-              className="question-text"
-            />
-          </div>
+      } else {
+        element = (
+          <span
+            dangerouslySetInnerHTML={{ __html: part.content }}
+            className="question-text"
+          />
         );
       }
 
-      return (
-        <span
-          key={index}
-          dangerouslySetInnerHTML={{ __html: part.content }}
-          className="question-text"
-        />
-      );
+      if (part.align && part.align !== 'left') {
+        const justify = part.align === 'center' ? 'center' : 'flex-end';
+        return (
+          <div key={index} style={{ display: 'flex', justifyContent: justify, marginTop: '8px', marginBottom: '8px' }}>
+            {element}
+          </div>
+        );
+      }
+      if (part.align === 'left') {
+        return <React.Fragment key={index}>{element}</React.Fragment>;
+      }
+
+      return <React.Fragment key={index}>{element}</React.Fragment>;
     });
   }, [content, getImageUrl]);
 

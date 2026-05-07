@@ -170,15 +170,15 @@ export async function smartImportFromOCR(
 
 /**
  * 自动匹配知识标签
- * 根据题目内容智能匹配五级知识标签
- * 返回匹配的标签ID列表（最多5个）
+ * 利用全部知识标签的名称和层级信息智能匹配
+ * 返回匹配标签ID列表（最多5个标签的各自身+父级，去重）
  */
 export async function autoMatchKnowledgeTags(content: string, title?: string): Promise<string[]> {
-  const matchedTagIds: string[] = [];
-  const searchText = (title + ' ' + content).toLowerCase();
+  const searchText = (title ? title + ' ' : '') + content;
+  const searchTextLower = searchText.toLowerCase();
   const matchedScores: Array<{ tagId: string; score: number; tagName: string; level: number; tag: any }> = [];
 
-  // 获取所有级别的知识标签（1-5级）
+  // 获取所有级别的知识标签（1-5级），包含完整层级
   const allTags = await prisma.knowledgeTag.findMany({
     include: {
       parent: {
@@ -197,31 +197,56 @@ export async function autoMatchKnowledgeTags(content: string, title?: string): P
     },
   });
 
-  // 匹配标签并计算匹配分数
+  // 为每个标签构建搜索词（标签名 + 所有父级名称 + 显式关键词库）
   for (const tag of allTags) {
-    const keywords = knowledgeKeywords[tag.name] || [tag.name];
+    const parentNames = getParentNames(tag);
+    const explicitKeywords = knowledgeKeywords[tag.name] || [];
+    // 去重合并：标签名、父级名、显式关键词
+    const allKeywords = [...new Set([tag.name, ...parentNames, ...explicitKeywords])];
     let score = 0;
 
-    for (const keyword of keywords) {
+    for (const keyword of allKeywords) {
       const keywordLower = keyword.toLowerCase();
+      if (!keywordLower) continue;
+
       // 标题中的关键词权重更高
       if (title && title.toLowerCase().includes(keywordLower)) {
         score += 3;
       }
-      // 内容中的关键词
-      if (searchText.includes(keywordLower)) {
+
+      // 内容中的关键词（includes 对中英文都有效）
+      if (searchTextLower.includes(keywordLower)) {
         score += 1;
       }
-      // 精确匹配（完整词匹配）权重更高
-      // 转义正则表达式特殊字符
-      const escapedKeyword = keywordLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // 精确匹配（完整词/短语匹配）权重更高
+      // 对中文关键词：检查是否被标点/空格/字符串边界包围
+      // 对英文/数字关键词：使用 \b 词边界
       try {
-        const exactMatch = new RegExp(`\\b${escapedKeyword}\\b`, 'i');
-        if (exactMatch.test(searchText)) {
+        const escaped = keywordLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        let exactHit = false;
+
+        // 判断是否为中文关键词（含CJK字符）
+        if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(keywordLower)) {
+          // 中文：检查关键词前后是否有边界（空格、标点、字符串起止）
+          const cjkBoundary = `(?:^|\\s|[，。！？；：""''（）【】《》])${escaped}(?:$|\\s|[，。！？；：""''（）【】《》])`;
+          const cjkRegex = new RegExp(cjkBoundary, 'i');
+          if (cjkRegex.test(searchText)) {
+            exactHit = true;
+          }
+        } else {
+          // 英文/数字：使用 \b 词边界
+          const wordRegex = new RegExp(`\\b${escaped}\\b`, 'i');
+          if (wordRegex.test(searchTextLower)) {
+            exactHit = true;
+          }
+        }
+
+        if (exactHit) {
           score += 2;
         }
       } catch (e) {
-        // 如果正则表达式无效，跳过精确匹配
+        // 正则表达式无效时跳过精确匹配
       }
     }
 
@@ -230,27 +255,50 @@ export async function autoMatchKnowledgeTags(content: string, title?: string): P
     }
   }
 
-  // 按分数排序，优先选择级别高（更精细）的标签
+  // 按分数降序，分数相同时优先级别高的（更精细的标签）
   matchedScores.sort((a, b) => {
-    // 首先按分数排序
     if (b.score !== a.score) return b.score - a.score;
-    // 分数相同，按级别排序（高级别优先）
     return b.level - a.level;
   });
 
-  // 只取最匹配的1个标签
-  const topMatch = matchedScores[0];
+  // 取分数 > 0 的前5个匹配（不再只取第1个）
+  const topMatches = matchedScores.filter(m => m.score > 0).slice(0, 5);
 
-  if (topMatch) {
-    console.log(`[标签匹配] 最佳匹配: [L${topMatch.level}] ${topMatch.tagName} (分数: ${topMatch.score})`);
-    // 返回最匹配的标签及其所有父级标签ID
-    const tagWithParents = getTagAndParentIds(topMatch.tag);
-    console.log(`[标签匹配] 包含父级标签共 ${tagWithParents.length} 个`);
-    return tagWithParents;
+  if (topMatches.length === 0) {
+    console.log(`[标签匹配] 未找到匹配标签`);
+    return [];
   }
 
-  console.log(`[标签匹配] 未找到匹配标签`);
-  return [];
+  // 每个匹配标签 + 其所有父级，合并去重
+  const resultIds: string[] = [];
+  const seenIds = new Set<string>();
+
+  for (const match of topMatches) {
+    console.log(`[标签匹配] 匹配: [L${match.level}] ${match.tagName} (分数: ${match.score})`);
+    const tagWithParents = getTagAndParentIds(match.tag);
+    for (const id of tagWithParents) {
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        resultIds.push(id);
+      }
+    }
+  }
+
+  console.log(`[标签匹配] 共 ${topMatches.length} 个匹配标签，含父级共 ${resultIds.length} 个标签ID`);
+  return resultIds;
+}
+
+/**
+ * 获取标签的所有父级名称（用于构建搜索文本）
+ */
+function getParentNames(tag: any): string[] {
+  const names: string[] = [];
+  let current = tag.parent;
+  while (current) {
+    names.push(current.name);
+    current = current.parent;
+  }
+  return names;
 }
 
 /**
