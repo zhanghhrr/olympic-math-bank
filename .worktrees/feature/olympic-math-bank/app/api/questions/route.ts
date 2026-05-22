@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     where.OR = [
       { content: { contains: search } },
       { source: { contains: search } },
+      { solution: { contains: search } },
     ];
   }
 

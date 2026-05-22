@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous } from 'lucide-react';
+import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous, ShoppingCart } from 'lucide-react';
 import { QuestionContent } from '@/components/QuestionContent';
 
 interface KnowledgeTagTreeNode {
@@ -207,7 +208,15 @@ function DifficultyStars({ level }: { level: number }) {
   );
 }
 
-function QuestionCard({ question }: { question: Question }) {
+function QuestionCard({ 
+  question, 
+  isSelected, 
+  onSelectToggle 
+}: { 
+  question: Question;
+  isSelected?: boolean;
+  onSelectToggle?: (id: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -225,9 +234,21 @@ function QuestionCard({ question }: { question: Question }) {
   };
 
   return (
-    <div className="card-elevated overflow-hidden">
+    <div className={`card-elevated overflow-hidden transition-all duration-200 ${isSelected ? 'ring-2 ring-primary border-transparent' : ''}`}>
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
+          {/* 选择框 */}
+          {onSelectToggle && (
+            <div className="pt-1 shrink-0">
+              <input 
+                type="checkbox" 
+                checked={isSelected} 
+                onChange={() => onSelectToggle(question.id)}
+                className="w-5 h-5 rounded border-muted-foreground/30 text-primary focus:ring-primary/20 cursor-pointer"
+              />
+            </div>
+          )}
+
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-3">
               <span className={`badge ${status.badgeClass}`}>
@@ -375,6 +396,7 @@ function QuestionCard({ question }: { question: Question }) {
 }
 
 export default function QuestionsPage() {
+  const router = useRouter();
   const [questions, setQuestions] = useState<Question[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -387,6 +409,9 @@ export default function QuestionsPage() {
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [showTagSidebar, setShowTagSidebar] = useState(true);
+
+  // 购物车选中的题目 IDs
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchTagTree();
@@ -514,6 +539,32 @@ export default function QuestionsPage() {
   const mergedExpandedNodes = new Set([...expandedNodes, ...autoExpandedIds]);
 
   const hasActiveFilters = filter.status || filter.grade || filter.type || selectedTagId;
+
+  // 切换题目选中状态
+  const handleSelectQuestion = (id: string) => {
+    setSelectedQuestionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 全选/取消全选当前页
+  const handleSelectAllCurrentPage = () => {
+    const currentPageIds = questions.map(q => q.id);
+    const allSelected = currentPageIds.every(id => selectedQuestionIds.has(id));
+    
+    setSelectedQuestionIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        currentPageIds.forEach(id => next.delete(id));
+      } else {
+        currentPageIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
 
   if (loading) {
     return (
@@ -737,12 +788,28 @@ export default function QuestionsPage() {
               </div>
             ) : (
               <>
-                <div className="text-sm text-muted-foreground">
-                  共 {totalCount} 道题目
-                  {selectedTagId && <span className="text-primary ml-2">(已按标签筛选)</span>}
+                <div className="flex items-center justify-between text-sm text-muted-foreground bg-muted/30 p-2 rounded-lg border border-border">
+                  <div className="flex items-center gap-3 pl-3">
+                    <input 
+                      type="checkbox" 
+                      checked={questions.length > 0 && questions.every(q => selectedQuestionIds.has(q.id))}
+                      onChange={handleSelectAllCurrentPage}
+                      className="w-4 h-4 rounded border-muted-foreground/30 text-primary focus:ring-primary/20 cursor-pointer"
+                    />
+                    <span>全选当前页</span>
+                  </div>
+                  <div>
+                    共 {totalCount} 道题目
+                    {selectedTagId && <span className="text-primary ml-2">(已按标签筛选)</span>}
+                  </div>
                 </div>
                 {questions.map((question) => (
-                  <QuestionCard key={question.id} question={question} />
+                  <QuestionCard 
+                    key={question.id} 
+                    question={question} 
+                    isSelected={selectedQuestionIds.has(question.id)}
+                    onSelectToggle={handleSelectQuestion}
+                  />
                 ))}
               </>
             )}
@@ -808,6 +875,42 @@ export default function QuestionsPage() {
             ) : (
               <p className="text-sm text-muted-foreground text-center py-4">{tagSearch ? '未找到匹配的标签' : '暂无标签数据'}</p>
             )}
+          </div>
+        </div>
+      )}
+      
+      {/* 悬浮组卷购物车 */}
+      {selectedQuestionIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-surface border border-border shadow-xl rounded-full px-6 py-3 flex items-center gap-6 z-50 animate-in slide-in-from-bottom-5">
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary relative">
+              <ShoppingCart className="w-5 h-5" />
+              <span className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-primary-foreground text-xs rounded-full flex items-center justify-center font-bold">
+                {selectedQuestionIds.size}
+              </span>
+            </div>
+            <span className="text-sm font-medium text-foreground">已选题目</span>
+          </div>
+          <div className="h-6 w-px bg-border"></div>
+          <div className="flex items-center gap-3">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setSelectedQuestionIds(new Set())}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              清空
+            </Button>
+            <Button 
+              size="sm" 
+              className="bg-primary hover:bg-primary-hover text-primary-foreground shadow-md px-6"
+              onClick={() => {
+                const ids = Array.from(selectedQuestionIds).join(',');
+                router.push(`/dashboard/print?ids=${ids}`);
+              }}
+            >
+              生成 PDF试卷
+            </Button>
           </div>
         </div>
       )}

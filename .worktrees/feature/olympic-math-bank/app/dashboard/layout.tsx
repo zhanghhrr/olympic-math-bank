@@ -17,8 +17,8 @@ export default async function DashboardLayout({
   return (
     <div className="min-h-screen bg-background warm-gradient">
       <Sidebar user={session.user} />
-      <div className="ml-60 h-screen overflow-hidden">
-        <main className="h-full">{children}</main>
+      <div className="ml-60 h-screen overflow-hidden print-reset-h print:ml-0">
+        <main className="h-full print-reset-h">{children}</main>
       </div>
     </div>
   );

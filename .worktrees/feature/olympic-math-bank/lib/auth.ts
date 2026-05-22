@@ -12,7 +12,9 @@ export const authOptions: NextAuthOptions = {
         password: { label: '密码', type: 'password' },
       },
       async authorize(credentials) {
+        console.log('Login attempt:', credentials?.email);
         if (!credentials?.email || !credentials?.password) {
+          console.log('Missing credentials');
           return null;
         }
 
@@ -20,16 +22,24 @@ export const authOptions: NextAuthOptions = {
           where: { email: credentials.email },
         });
 
-        if (!user || !user.password) {
+        if (!user) {
+          console.log('User not found:', credentials.email);
+          return null;
+        }
+
+        if (!user.password) {
+          console.log('User has no password:', credentials.email);
           return null;
         }
 
         const isValid = await bcrypt.compare(credentials.password, user.password);
 
         if (!isValid) {
+          console.log('Invalid password for user:', credentials.email);
           return null;
         }
 
+        console.log('Login successful:', user.email);
         return {
           id: user.id,
           email: user.email,

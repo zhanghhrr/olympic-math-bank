@@ -29,8 +29,12 @@ const navigation = [
 export function Sidebar({ user }: { user: any }) {
   const pathname = usePathname();
 
+  if (pathname === '/dashboard/print') {
+    return null;
+  }
+
   return (
-    <div className="fixed left-0 top-0 h-full w-60 bg-surface border-r border-border flex flex-col">
+    <div className="fixed left-0 top-0 h-full w-60 bg-surface border-r border-border flex flex-col no-print">
       {/* Logo */}
       <div className="p-5 border-b border-border">
         <Link href="/dashboard" className="flex items-center gap-3 group">
