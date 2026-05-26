@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Printer, ArrowLeft, Settings2, BookOpen, GraduationCap, Plus, ArrowUp, ArrowDown, Trash2, Heading1, Heading2, SplitSquareHorizontal, Layers } from 'lucide-react';
+import { Printer, ArrowLeft, Settings2, BookOpen, GraduationCap, Plus, ArrowUp, ArrowDown, Trash2, Heading1, Heading2, SplitSquareHorizontal, Layers, GripVertical, DownloadCloud } from 'lucide-react';
 import { QuestionContent } from '@/components/QuestionContent';
 
 interface Question {
@@ -33,6 +33,8 @@ function PrintPageContent() {
   // 试卷配置状态
   const [mode, setMode] = useState<'student' | 'teacher'>('student');
   const [showConfig, setShowConfig] = useState(true);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchQuestions = async () => {
@@ -77,12 +79,60 @@ function PrintPageContent() {
 
   const handlePrint = () => {
     setShowConfig(false);
-    // 等待 React 重新渲染隐藏配置面板后，调用系统打印
     setTimeout(() => {
       window.print();
-      // 打印完成后恢复配置面板显示
       setTimeout(() => setShowConfig(true), 500);
     }, 100);
+  };
+
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    try {
+      const payload = {
+        blocks: blocks.map((b) => {
+          if (b.type === 'QUESTION' && b.question) {
+            return {
+              id: b.id,
+              type: b.type,
+              question: {
+                id: b.question.id,
+                content: b.question.content,
+                answer: b.question.answer,
+                solution: b.question.solution,
+                type: b.question.type,
+              },
+            };
+          }
+          return { id: b.id, type: b.type, content: b.content };
+        }),
+        mode,
+      };
+
+      const res = await fetch('/api/export/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error('PDF 生成失败');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'exam.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('下载 PDF 失败:', err);
+      alert('PDF 生成失败，请检查网络连接后重试');
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const addBlock = (index: number, type: BlockType) => {
@@ -112,6 +162,32 @@ function PrintPageContent() {
       [newBlocks[index], newBlocks[index + 1]] = [newBlocks[index + 1], newBlocks[index]];
       setBlocks(newBlocks);
     }
+  };
+
+  const moveBlockTo = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const newBlocks = [...blocks];
+    const [moved] = newBlocks.splice(fromIndex, 1);
+    newBlocks.splice(toIndex, 0, moved);
+    setBlocks(newBlocks);
+  };
+
+  const handleDragStart = (index: number) => {
+    setDragIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    if (dragIndex !== null && dragOverIndex !== null && dragIndex !== dragOverIndex) {
+      moveBlockTo(dragIndex, dragOverIndex);
+    }
+    setDragIndex(null);
+    setDragOverIndex(null);
   };
 
   const updateBlockContent = (index: number, content: string) => {
@@ -146,7 +222,7 @@ function PrintPageContent() {
           <h2 className="font-semibold text-foreground tracking-tight">排版总览</h2>
         </div>
         <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          {blocks.map((block) => {
+          {blocks.map((block, index) => {
             if (block.type === 'QUESTION') questionCount++;
             if (block.type === 'PAGE_BREAK') pageCount++;
             
@@ -155,12 +231,29 @@ function PrintPageContent() {
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             };
 
+            const isDragging = dragIndex === index;
+            const isDragOver = dragOverIndex === index && dragIndex !== index;
+
             return (
               <div 
                 key={`outline-${block.id}`}
+                draggable
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragEnd={handleDragEnd}
                 onClick={scrollToBlock}
-                className="px-3 py-2 text-sm rounded-lg hover:bg-muted cursor-pointer transition-colors flex items-center gap-2 text-muted-foreground hover:text-foreground"
+                className={`px-3 py-2 text-sm rounded-lg hover:bg-muted cursor-pointer transition-colors flex items-center gap-2 text-muted-foreground hover:text-foreground group/outline ${
+                  isDragging ? 'opacity-40' : ''
+                } ${
+                  isDragOver ? 'bg-blue-100 border-2 border-blue-400 border-dashed' : 'border-2 border-transparent'
+                }`}
               >
+                <div 
+                  className="shrink-0 cursor-grab active:cursor-grabbing opacity-30 group-hover/outline:opacity-70 transition-opacity"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <GripVertical className="w-4 h-4" />
+                </div>
                 {block.type === 'MAIN_TITLE' && <Heading1 className="w-4 h-4 text-blue-500 shrink-0" />}
                 {block.type === 'SUB_TITLE' && <Heading2 className="w-4 h-4 text-emerald-500 shrink-0" />}
                 {block.type === 'QUESTION' && <BookOpen className="w-4 h-4 text-orange-500 shrink-0" />}
@@ -209,6 +302,10 @@ function PrintPageContent() {
             page-break-inside: avoid;
             break-inside: avoid;
           }
+          /* 学生版题目：如果页面剩余空间不够整个题目（含4cm答题区），自动推到下一页 */
+          .auto-page-question {
+            break-before: auto;
+          }
           /* 强制分页符 */
           .page-break-after {
             page-break-after: always;
@@ -218,6 +315,17 @@ function PrintPageContent() {
           .teacher-answer-box {
             border: 1px solid #e2e8f0 !important;
             background-color: #f8fafc !important;
+          }
+          /* 学生版图片宽度固定为 A4/2.5 ≈ 84mm */
+          .print-question-content img {
+            max-width: 84mm !important;
+            height: auto !important;
+          }
+          /* 答题空白区域：统一 4cm */
+          .answer-blank {
+            height: 4cm;
+            border-top: 1px dashed #d1d5db;
+            margin-top: 8px;
           }
         }
         /* 屏幕上的 A4 纸张模拟预览 */
@@ -233,6 +341,19 @@ function PrintPageContent() {
         
         .block-hover-group:hover .block-actions {
           opacity: 1;
+        }
+        
+        /* 学生版图片宽度固定为 A4/2.5 ≈ 84mm（屏幕预览） */
+        .print-question-content img {
+          max-width: 84mm !important;
+          height: auto !important;
+        }
+        
+        /* 答题空白区域：统一 4cm（屏幕预览） */
+        .answer-blank {
+          height: 4cm;
+          border-top: 1px dashed #d1d5db;
+          margin-top: 8px;
         }
       `}} />
 
@@ -274,6 +395,10 @@ function PrintPageContent() {
             <Button onClick={handlePrint} className="bg-primary hover:bg-primary-hover">
               <Printer className="w-4 h-4 mr-2" />
               打印 / 导出 PDF
+            </Button>
+            <Button onClick={handleDownloadPdf} disabled={isDownloading} variant="secondary">
+              <DownloadCloud className="w-4 h-4 mr-2" />
+              {isDownloading ? '生成中...' : '下载 PDF (React-PDF)'}
             </Button>
           </div>
         </div>
@@ -322,13 +447,13 @@ function PrintPageContent() {
 
                 {/* 块内容渲染 */}
                 {block.type === 'MAIN_TITLE' && (
-                  <div className="text-center py-4">
+                  <div className="py-4">
                     {showConfig ? (
                       <input 
                         type="text" 
                         value={block.content || ''} 
                         onChange={(e) => updateBlockContent(index, e.target.value)}
-                        className="text-3xl font-black text-black text-center w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none tracking-wider transition-colors" 
+                        className="text-3xl font-black text-black w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none tracking-wider transition-colors" 
                         style={{ fontFamily: '"SimHei", "黑体", sans-serif' }}
                         placeholder="请输入大标题"
                       />
@@ -339,13 +464,13 @@ function PrintPageContent() {
                 )}
 
                 {block.type === 'SUB_TITLE' && (
-                  <div className="text-center py-2">
+                  <div className="py-2">
                     {showConfig ? (
                       <input 
                         type="text" 
                         value={block.content || ''} 
                         onChange={(e) => updateBlockContent(index, e.target.value)}
-                        className="text-base text-gray-800 text-center w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none transition-colors" 
+                        className="text-base text-gray-800 w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 outline-none transition-colors" 
                         style={{ fontFamily: '"KaiTi", "楷体", sans-serif' }}
                         placeholder="请输入小标题/考试信息"
                       />
@@ -363,16 +488,14 @@ function PrintPageContent() {
                         {/* 题目序号计算：统计当前及之前的 QUESTION 块数量 */}
                         {blocks.slice(0, index + 1).filter(b => b.type === 'QUESTION').length}.
                       </span>
-                      <div className="flex-1">
+                      <div className="flex-1 print-question-content">
                         <QuestionContent content={block.question.content} className="text-black" />
                       </div>
                     </div>
 
-                    {/* 学生版：留白作答区 */}
+                    {/* 学生版：统一 4cm 留白作答区 */}
                     {mode === 'student' && (
-                      <div className={`w-full mt-4 ${block.question.type === 'SOLUTION' || block.question.type === 'CALCULATION' ? 'h-48' : 'h-12'}`}>
-                        {/* 解答题和计算题留出较大空白，填空选择题留小空白 */}
-                      </div>
+                      <div className="answer-blank" />
                     )}
 
                     {/* 教师版：显示答案和解析 */}

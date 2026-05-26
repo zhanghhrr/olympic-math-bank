@@ -24,6 +24,8 @@ export interface ParsedQuestion {
   type?: QuestionType;
   difficulty?: number;
   hasImage?: boolean;
+  formulas?: string;
+  sourceBlocks?: string;
 }
 
 export type { ParsedQuestion as ParsedQuestionType };
@@ -33,7 +35,8 @@ export class HybridQuestionIdentifier {
   private questionKeywords = [
     '例题', '练一练', '乘风破浪', '题目', '小试', '挑战',
     '口算', '脱式计算', '解方程', '牛刀', '真题', '练习', '进门考',
-    '计算', '算一算', '解答题', '典型例题', '典型例', '例'
+    '计算', '算一算', '解答题', '典型例题', '典型例', '例',
+    '小测', '测试', '试卷', '复习', '期末', '期中', '单元', '练习卷'
   ];
 
   // 答案关键词 - 扩展更多格式
@@ -49,10 +52,10 @@ export class HybridQuestionIdentifier {
   ];
 
   // 序号匹配: "1.", "1、", "(1)", "①", "【例1】", "一、", "(一)" 等
-  private numberPattern = /^\s*(\d+[\.、]|[(（]\s*\d+\s*[)）]|[①-⑩]|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.、]|【.*?\d+.*?】|第\s*\d+\s*题|[一二三四五六七八九十]+[、\.]|[(（]\s*[一二三四五六七八九十]+\s*[)）])/;
+  private numberPattern = /^\s*(?:[-–—]\s*)?(\d+[\.．、]|[(（]\s*\d+\s*[)）]|[①-⑩]|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.．、]|【.*?\d+.*?】|第\s*\d+\s*题|[一二三四五六七八九十]+[、．\.]|[(（]\s*[一二三四五六七八九十]+\s*[)）])/;
 
   // 列表分割匹配
-  private listPattern = /^\s*(\d+[\.、]|[(（]\s*\d+\s*[)）]|[一二三四五六七八九十]+[、\.]|[(（]\s*[一二三四五六七八九十]+\s*[)）]|[①-⑩]|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.、])\s*/;
+  private listPattern = /^\s*(?:[-–—]\s*)?(\d+[\.．、]|[(（]\s*\d+\s*[)）]|[一二三四五六七八九十]+[、．\.]|[(（]\s*[一二三四五六七八九十]+\s*[)）]|[①-⑩]|[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.．、])\s*/;
 
   // 图片匹配
   private imagePattern = /!\[.*?\]\(.*?\)|<img.*?>/;
@@ -151,7 +154,7 @@ export class HybridQuestionIdentifier {
       const isNewQuestion = this.listPattern.test(line) &&
         !line.startsWith('【') &&
         !line.startsWith('(') &&
-        !line.match(/^\d+[\.、]\s*原式/); // 排除 "(1) 原式" 这种答案格式
+        !line.match(/^\d+[\.．、]\s*原式/); // 排除 "(1) 原式" 这种答案格式
 
       if (isNewQuestion && currentQuestion.length > 0) {
         // 保存之前的题目
@@ -306,7 +309,7 @@ export class HybridQuestionIdentifier {
         // 刷题课中有些题目可能没有标准答案格式，但仍应保留
         if (!block.hasAnswer) {
           // 检查是否包含题号或明显的题目特征
-          const hasQuestionNumber = /^\s*\d+[\.、]/.test(block.content);
+          const hasQuestionNumber = /^\s*(?:[-–—]\s+)?\d+[\.．、]/.test(block.content);
           const hasQuestionKeyword = /计算|求|问|多少|几|是/.test(block.content);
           const isLongEnough = block.content.length > 20;
 
@@ -450,7 +453,7 @@ export class HybridQuestionIdentifier {
           if (this.hasAnswerKeyword(headerText)) {
             blockType = 'single_question';
           } else {
-            blockType = 'ignore';
+            blockType = 'single_question';
           }
         } else {
           if (this.hasAnswerKeyword(headerText)) {
@@ -466,7 +469,30 @@ export class HybridQuestionIdentifier {
           header: headerText
         };
       } else {
-        currentBlock.content.push(line);
+        const isNumStart = this.numberPattern.test(lineStripped);
+        const curContent = currentBlock.content.join('\n');
+        const hasAns = this.hasAnswerKeyword(curContent);
+
+        if (isNumStart && hasAns && currentBlock.content.length > 0 &&
+            currentBlock.type !== 'ignore') {
+          const contentStr = curContent.trim();
+          if (contentStr) {
+            blocks.push({
+              type: currentBlock.type as any,
+              content: contentStr,
+              header: currentBlock.header,
+              hasAnswer: false,
+              hasImage: false
+            });
+          }
+          currentBlock = {
+            type: 'single_question',
+            content: [line],
+            header: currentBlock.header
+          };
+        } else {
+          currentBlock.content.push(line);
+        }
       }
     }
 
@@ -502,10 +528,10 @@ export class HybridQuestionIdentifier {
     if (/^[（(]\s*[一二三四五六七八九十百]+\s*[)）]$/.test(text)) return 'CHINESE_PAREN';
 
     // Arabic numerals
-    if (/^\d+[.、]$/.test(text)) return 'ARABIC_DOT';
+    if (/^\d+[.．、]$/.test(text)) return 'ARABIC_DOT';
 
     // Small nums
-    if (/^[（(]\s*\d+\s*[)）]$/.test(text) || /^[①-⑩]$/.test(text) || /^[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.、]$/.test(text)) {
+    if (/^[（(]\s*\d+\s*[)）]$/.test(text) || /^[①-⑩]$/.test(text) || /^[ⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]+[\.．、]$/.test(text)) {
       return 'SMALL_NUM';
     }
 
@@ -528,7 +554,7 @@ export class HybridQuestionIdentifier {
     // 匹配模式：行首的数字+点，后面紧跟换行符，再跟非空行
     // 使用多行模式(m)和点号匹配所有字符(s)
     normalized = normalized.replace(
-      /^(\s*\d+[\.．、])\s*\n(?!\s*\d+[\.．、]|\s*【|\s*!\[|\s*$)(.+)$/gm,
+      /^(\s*(?:[-–—]\s+)?\d+[\.．、])\s*\n(?!\s*(?:[-–—]\s+)?\d+[\.．、]|\s*【|\s*!\[|\s*$)(.+)$/gm,
       '$1 $2'
     );
 
@@ -612,7 +638,7 @@ export class HybridQuestionIdentifier {
       const hasAns = !!(a) || this.hasAnswerKeyword(text);
 
       // 检查是否看起来像题目（有题号或题目特征）
-      const hasQuestionNumber = /^\s*\d+[\.、]/.test(text);
+      const hasQuestionNumber = /^\s*(?:[-–—]\s+)?\d+[\.．、]/.test(text);
       const hasQuestionKeyword = /计算|求|问|多少|几|是|个|填|选择/.test(text);
       const looksLikeQuestion = hasQuestionNumber || (hasQuestionKeyword && text.length > 15);
 
@@ -680,7 +706,7 @@ export class HybridQuestionIdentifier {
     const numbers: number[] = [];
 
     for (const block of blocks) {
-      const match = block.content.match(/^(\d+)[\.、]/);
+      const match = block.content.match(/^\s*(?:[-–—]\s+)?(\d+)[\.．、]/);
       if (match) {
         numbers.push(parseInt(match[1]));
       }
@@ -711,15 +737,16 @@ export class HybridQuestionIdentifier {
 
       const [q, a] = this.splitQAInBlock(text);
       const finalHasAns = !!(a) || hasAns;
-      if (finalHasAns) {
-        blocks.push({
-          content: q,
-          answer: a,
-          hasAnswer: finalHasAns,
-          hasImage: this.hasImage(text),
-          type: 'single_question'
-        });
-      }
+
+      if (!q || q.length < 2) return;
+
+      blocks.push({
+        content: q,
+        answer: a || undefined,
+        hasAnswer: finalHasAns,
+        hasImage: this.hasImage(text),
+        type: 'single_question'
+      });
     };
 
     for (let i = 0; i < lines.length; i++) {
@@ -729,8 +756,15 @@ export class HybridQuestionIdentifier {
 
       const isQKeyword = this.isQuestionHeader(lineStripped);
       const isNumStart = this.numberPattern.test(lineStripped);
+      const isAnswerHeader = this.hasAnswerKeyword(lineStripped) && isQKeyword;
 
       let startNew = false;
+
+      if (isAnswerHeader && currentBlockLines.length > 0) {
+        currentBlockLines.push(lineStripped);
+        currentHasAnswer = true;
+        continue;
+      }
 
       if (isQKeyword) {
         startNew = true;
@@ -764,33 +798,20 @@ export class HybridQuestionIdentifier {
    * 检测题目类型 - 限定为四类：填空题、选择题、解答题、计算题
    */
   detectQuestionType(content: string): '填空题' | '选择题' | '解答题' | '计算题' {
-    // 1. 检测计算题（优先级最高）
-    // 特征：包含计算、口算、脱式、竖式等关键词，或纯算式
-    if (/计算|口算|脱式|竖式|简便计算|递等式|直接写得数/.test(content)) {
-      // 如果同时有横线填空，可能是填空形式的计算题
-      if (/[_\(\)（）]+/.test(content) && !/=/.test(content)) {
-        return '填空题';
-      }
-      return '计算题';
-    }
+    return detectQuestionType(content);
+  }
 
-    // 2. 检测选择题
-    // 特征：包含选项A/B/C/D，且选项格式正确（如A. B. C. D. 或 A、B、C、D）
-    // 更严格的检测：确保A/B/C/D是选项标记，而不是单词中的字母
-    const choicePattern = /(?:^|[^\u4e00-\u9fa5A-Za-z])([A-D])[.、：:]\s|\b选择[题項]|^选项\s/m;
-    if (choicePattern.test(content) || /[A-D][.、]\s*[A-D][.、]/.test(content)) {
-      return '选择题';
-    }
-
-    // 3. 检测填空题
-    // 特征：包含横线、括号等待填位置
-    if (/[_\(\)（）]+|____|□/.test(content) || /填空/.test(content)) {
-      return '填空题';
-    }
-
-    // 4. 默认为解答题
-    // 应用题、几何证明、文字叙述题等都归为解答题
-    return '解答题';
+  /**
+   * 将中文题型映射为 Prisma 数据库枚举值
+   */
+  static questionTypeToDB(type: '填空题' | '选择题' | '解答题' | '计算题'): 'FILL_BLANK' | 'CHOICE' | 'SOLUTION' | 'CALCULATION' {
+    const map: Record<string, 'FILL_BLANK' | 'CHOICE' | 'SOLUTION' | 'CALCULATION'> = {
+      '填空题': 'FILL_BLANK',
+      '选择题': 'CHOICE',
+      '解答题': 'SOLUTION',
+      '计算题': 'CALCULATION',
+    };
+    return map[type] || 'SOLUTION';
   }
 
   /**
@@ -811,9 +832,15 @@ export class HybridQuestionIdentifier {
   private cleanQuestionContent(content: string): string {
     let cleaned = content;
 
+    // 策略0: 移除行首 ## 残留（标题分隔符遗留，包括独立标题行和"## 文字"）
+    cleaned = cleaned.replace(/^#{1,6}[ \t]*.*$/gm, '');
+
+    // 策略0.5: 移除 markdown 列表前缀（如 "- 1．" -> "1．"）
+    cleaned = cleaned.replace(/^\s*[-–—]\s+(?=\d+[\.．、]|[(（]\s*\d+\s*[)）]|[①-⑩]|[一二三四五六七八九十]+[、．\.])/gm, '');
+
     // 策略1: 移除行首的重复数字残留（数字串后跟序号的情况）
     // 匹配行首的连续数字（6位以上），后面跟着序号
-    cleaned = cleaned.replace(/^(\d{6,})\s+(\d+[\.、]|[(（]\s*\d+\s*[)）])/gm, '$2');
+    cleaned = cleaned.replace(/^(\d{6,})\s+(\d+[\.．、]|[(（]\s*\d+\s*[)）])/gm, '$2');
 
     // 策略1.5: 修复重复数字模式（如 "345345345345" 这种重复3-4次的数字）
     // 检测重复3次以上的短数字串（3-5位数字重复）
@@ -842,7 +869,7 @@ export class HybridQuestionIdentifier {
 
     // 首先处理章节标题和题目在同一行的情况
     // 模式：Markdown标题标记 + 章节标题 + 题号
-    const combinedPattern = /^(#{1,6}\s*)?[(（]?[一二三四五六七八九十]+[)）]?、?\s*[\u4e00-\u9fa5]{2,8}(?:计算|应用|几何|计数|数论|杂题|专题|部分)?\s*(\d+[\.、])/gm;
+    const combinedPattern = /^(#{1,6}\s*)?[(（]?[一二三四五六七八九十]+[)）]?、?\s*[\u4e00-\u9fa5]{2,8}(?:计算|应用|几何|计数|数论|杂题|专题|部分)?\s*(\d+[\.．、])/gm;
     cleaned = cleaned.replace(combinedPattern, '$1$2');
 
     // 然后处理单独的章节标题行
@@ -883,7 +910,85 @@ export class HybridQuestionIdentifier {
     // 策略5: 清理行首行尾的空格
     cleaned = cleaned.split('\n').map(line => line.trim()).join('\n');
 
+    // 策略6: 合并 OCR 导致的断行
+    // 如果某行不以句末标点结束（。？！…；：，,)】"），且下一行非空，
+    // 且下一行不以题号/选项字母开头，则合并为一行
+    cleaned = this.mergeOcrBrokenLines(cleaned);
+
+    // 策略6.5: 推断填空占位符 — OCR 丢失了下划线，在「空格 + 量词」处插入 ______
+    // 例："相距 米." → "相距______米."  "是 米/分，" → "是______米/分，"
+    cleaned = this.inferBlankPlaceholders(cleaned);
+
+    // 策略7: 清理中文文本中多余的词间空格
+    // 中文之间不应有空格："相向出 发" → "相向出发"
+    cleaned = cleaned.replace(/([\u4e00-\u9fa5])\s+([\u4e00-\u9fa5])/g, '$1$2');
+
+    // 策略8: 合并多余空行（再次执行，因为合并断行可能产生新空行）
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
     return cleaned.trim();
+  }
+
+  /**
+   * 合并 OCR 导致的非语义断行
+   * 规则：
+   * 1. 若某行不以句末标点（。？！…；：，)】"）结束
+   * 2. 且下一行非空
+   * 3. 且下一行不以题号/选项字母/中文序号开头
+   * → 合并两行
+   */
+  private mergeOcrBrokenLines(text: string): string {
+    const lines = text.split('\n');
+    const result: string[] = [];
+    const sentenceEnd = /[。？！…；：，)）】"』\w]$/;
+    const newLineStart = /^\s*(?:\d+[\.．、]|[-–—]\s*\d|[(（]\s*\d|第\s*\d|[一二三四五六七八九十]+[、．\.]|[A-D][\.．、])/;
+    // 不应合并的行：代码围栏、分隔线、空行、纯数字、孤立标记
+    const skipMergeLine = /^\s*(?:```|[-*_]{3,}|={3,}|\*{2,}|\d+$|#)/;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim()) {
+        result.push(line);
+        continue;
+      }
+      if (i + 1 < lines.length && lines[i + 1].trim()
+          && !sentenceEnd.test(line.trim())
+          && !newLineStart.test(lines[i + 1])
+          && !skipMergeLine.test(lines[i + 1])
+          && !skipMergeLine.test(line)) {
+        result.push(line + lines[i + 1]);
+        i++;
+      } else {
+        result.push(line);
+      }
+    }
+    return result.join('\n');
+  }
+
+  /**
+   * 推断填空占位符 — 当 OCR 丢失下划线时，在语义上应填入数值的位置插入 ______
+   *
+   * 启发式规则：
+   *   空格前是"相距/是/为/需要/共/长/宽/高"等预期后接数值的词
+   *   空格后是量词（米、千米、米/分、分钟、元、个 等）
+   *   空格前没有数字（排除 "走45 米" 这种普通排版空格）
+   *
+   * 例：
+   *   "相距 米。"     → "相距______米。"
+   *   "是 米/分，"    → "是______米/分，"
+   *   "需要 分钟到达" → "需要______分钟到达"
+   */
+  private inferBlankPlaceholders(text: string): string {
+    const indicatorRe = /(相距|是|[速度长宽高共计需]为?|共[有计]?|需要?|[长宽高][度为]?)/;
+     const unitRe = /[米千米厘米分米毫米秒分时天元个克千克吨][\/每]*(?:分|秒|时|米|千米|厘米)?/;
+
+    return text.replace(
+      new RegExp(
+        `(${indicatorRe.source})\\s+(?=${unitRe.source}(?:[，,。.]|$))`,
+        'g'
+      ),
+      '$1______'
+    );
   }
 
   /**
@@ -921,6 +1026,13 @@ export class HybridQuestionIdentifier {
 
     // 清理多余空行
     cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+    // 移除代码围栏标记：``` 和 ```language
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\s*$/gm, '');
+    // 移除分隔线
+    cleaned = cleaned.replace(/^[-\*_]{3,}\s*$/gm, '');
+    // 移除孤立的 ** 标记
+    cleaned = cleaned.replace(/^\s*\*{2,}\s*$/gm, '');
 
     return cleaned.trim();
   }
@@ -1025,7 +1137,7 @@ export class HybridQuestionIdentifier {
       let title: string | undefined;
 
       // 尝试匹配题号+标题的格式
-      const titleMatch = cleanedContent.match(/^(?:\d+[\.、]|典型例题|牛刀小试)\s*(.+?)(?:\n|$)/);
+      const titleMatch = cleanedContent.match(/^(?:\d+[\.．、]|典型例题|牛刀小试)\s*(.+?)(?:\n|$)/);
       if (titleMatch) {
         title = titleMatch[1].trim();
       }
@@ -1054,7 +1166,7 @@ export class HybridQuestionIdentifier {
 
       // 确保内容以正确的题号开头
       let finalContent = cleanedContent;
-      const hasNumberPrefix = /^\d+[\.、]/.test(cleanedContent);
+      const hasNumberPrefix = /^\s*(?:[-–—]\s+)?\d+[\.．、]/.test(cleanedContent);
       if (!hasNumberPrefix && title) {
         // 如果没有题号但有标题，尝试添加题号
         finalContent = `${questionNumber}. ${cleanedContent}`;
@@ -1086,3 +1198,74 @@ export class HybridQuestionIdentifier {
 
 // 导出单例
 export const questionIdentifier = new HybridQuestionIdentifier();
+
+/**
+ * 增强版题目类型检测（独立函数）
+ *
+ * 检测优先级（从高到低）：
+ * 1. 计算题：含「计算/口算/脱式/竖式/递等式」等关键词（含填空符号则降为填空题）
+ * 2. 选择题：含多行 A/B/C/D 选项标记，或「选择/选项」关键词
+ * 3. 填空题：含下划线 ___、括号（）、方框 □、填空关键词、中文省略号…… 等情况
+ * 4. 解答题：一切不匹配上述三类特征的题目（兜底）
+ */
+export function detectQuestionType(content: string): '填空题' | '选择题' | '解答题' | '计算题' {
+  // ── 1. 计算题（优先级最高）─────────────────
+  if (/计算|口算|脱式|竖式|简便计算|递等式|直接写得数/.test(content)) {
+    // 如果同时有横线/括号填空，且无等号，则为填空形式的计算题
+    if (/(_{3,}|[(（]\s*[)）]|\s*?)/.test(content) && !/=/.test(content)) {
+      return '填空题';
+    }
+    return '计算题';
+  }
+
+  // ── 2. 选择题 ──────────────────────────────
+  // 2a. 多行选项：至少3行的行首是 A/B/C/D + 分隔符
+  const lines = content.split('\n');
+  const choiceStartCount = lines.filter(l => /^\s*[A-D][\.．、：:\s)]/.test(l)).length;
+  if (choiceStartCount >= 3) return '选择题';
+
+  // 2b. 行内连续选项：A.xxx B.xxx C.xxx D.xxx
+  if (/(?:^|\s)[A-D][\.．、]\s.+?(?:^|\s)[A-D][\.．、]\s.+?(?:^|\s)[A-D][\.．、]/m.test(content)) {
+    return '选择题';
+  }
+
+  // 2c. 关键词 + 至少两个选项
+  if (/选择[题項]|^选项\s/m.test(content)) return '选择题';
+
+  // 2d. 内容中包含非单词边界的 A-D 选项标记（严格的上下文检测）
+  // 排除作为单词一部分的情况（如 "Area", "BCD"）
+  const strictChoiceRe = /(?:^|[\s,，。；;])([A-D])[\.．、：:]/gm;
+  let choiceCount = 0;
+  const seen = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = strictChoiceRe.exec(content)) !== null) {
+    if (!seen.has(m[1])) { seen.add(m[1]); choiceCount++; }
+  }
+  if (choiceCount >= 3) return '选择题';
+
+  // ── 3. 填空题 ──────────────────────────────
+  // 3a. 关键词匹配
+  if (/填空|填入|填写/.test(content)) return '填空题';
+
+  // 3b. 空白占位符：下划线（2个以上）、方框、半角括号（）、中文省略号……
+  if (/(_{2,}|[…]{2}|□|（\s*）)/.test(content)) return '填空题';
+
+  // 3c. 题目末尾是问句 + 含空白特征（如「_____米」「是____」）
+  if (/[？?]$/m.test(content)) {
+    if (/_{2,}|（\s*）/.test(content)) return '填空题';
+  }
+
+  // 3d. LaTeX 公式中的空白占位符：\underline{\quad} 等
+  if (/\\underline\{\\quad\}|\\fillin/.test(content)) return '填空题';
+
+  // 3e. 推断填空：OCR丢失了下划线，但内容结构暗示为填空题
+  // 特征：以陈述句/逗号结尾，且末尾量词前缺数字
+  // 例："相距米。" → 应为"相距______米。"  "是米/分，" → 应为"是______米/分，"
+  if (/[。.，,；;]$/m.test(content)) {
+    const impliedBlankRe = /(?:相距|速度[是为]?|[是以为]|共[计行走了]?|需要|[长宽高][为度]?)\s*[米千米厘米分米毫米秒分时天元个克千克吨][\/\u6bcf]*(?:分|秒|时|米|千米|厘米)?[。.，,；;]?\s*$/m;
+    if (impliedBlankRe.test(content)) return '填空题';
+  }
+
+  // ── 4. 解答题（兜底）──────────────────────
+  return '解答题';
+}

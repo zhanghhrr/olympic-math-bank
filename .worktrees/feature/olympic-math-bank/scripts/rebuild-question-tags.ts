@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import { calculateTagScore } from '../lib/ocr/tagging';
 
 const prisma = new PrismaClient({
   datasources: {
@@ -120,35 +121,6 @@ const knowledgeKeywords: Record<string, string[]> = {
   '排列问题': ['摆成一排', '摆法', '排列', '顺序', '不能摆在', '最右边', '最左边'],
 };
 
-/**
- * 计算标签对题目的匹配分数
- */
-function calculateTagScore(content: string, tagName: string): number {
-  const keywords = knowledgeKeywords[tagName] || [tagName];
-  const lowerContent = content.toLowerCase();
-  let score = 0;
-
-  for (const keyword of keywords) {
-    const lowerKeyword = keyword.toLowerCase();
-    // 精确匹配（完整词匹配）权重更高
-    try {
-      const exactMatch = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-      if (exactMatch.test(lowerContent)) {
-        score += 2;
-      }
-    } catch (e) {}
-    // 模糊匹配
-    if (lowerContent.includes(lowerKeyword)) {
-      score += 1;
-    }
-  }
-
-  return score;
-}
-
-/**
- * 获取标签及其所有父级标签的ID列表
- */
 function getTagAndParentIds(tag: any): string[] {
   const ids: string[] = [tag.id];
   let current = tag;
@@ -214,7 +186,7 @@ async function main() {
     const scoredTags = question.knowledgeTags.map(qt => ({
       qt,
       tag: qt.knowledgeTag,
-      score: calculateTagScore(question.content, qt.knowledgeTag.name)
+      score: calculateTagScore(question.content, qt.knowledgeTag)
     }));
 
     // 按分数排序，分数相同则level高的优先
@@ -226,10 +198,13 @@ async function main() {
     const topMatch = scoredTags[0];
 
     if (!topMatch || topMatch.score === 0) {
-      // 没有匹配，清空标签
-      for (const qt of question.knowledgeTags) {
-        await prisma.questionKnowledgeTag.delete({
-          where: { questionId_knowledgeTagId: { questionId: question.id, knowledgeTagId: qt.knowledgeTagId } }
+      const deleteIds = question.knowledgeTags.map(qt => qt.knowledgeTagId);
+      if (deleteIds.length > 0) {
+        await prisma.questionKnowledgeTag.deleteMany({
+          where: {
+            questionId: question.id,
+            knowledgeTagId: { in: deleteIds },
+          },
         });
       }
       console.log(`✓ [${question.id}] 清空标签（无匹配）`);
@@ -238,20 +213,18 @@ async function main() {
       continue;
     }
 
-    // 获取最匹配标签及其父级ID
     const validTagIds = getTagAndParentIds(topMatch.tag);
 
-    // 删除不在有效列表中的标签
-    const currentIds = new Set(question.knowledgeTags.map(qt => qt.knowledgeTagId));
     const validIds = new Set(validTagIds);
     const toDelete = question.knowledgeTags.filter(qt => !validIds.has(qt.knowledgeTagId));
 
     if (toDelete.length > 0) {
-      for (const qt of toDelete) {
-        await prisma.questionKnowledgeTag.delete({
-          where: { questionId_knowledgeTagId: { questionId: question.id, knowledgeTagId: qt.knowledgeTagId } }
-        });
-      }
+      await prisma.questionKnowledgeTag.deleteMany({
+        where: {
+          questionId: question.id,
+          knowledgeTagId: { in: toDelete.map(qt => qt.knowledgeTagId) },
+        },
+      });
       console.log(`✓ [${question.id}] 更新标签`);
       console.log(`  题干: ${question.content.substring(0, 40)}...`);
       console.log(`  最佳匹配: ${topMatch.tag.name} (分数: ${topMatch.score})`);

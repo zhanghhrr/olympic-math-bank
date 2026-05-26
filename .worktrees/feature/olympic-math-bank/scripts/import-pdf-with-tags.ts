@@ -170,14 +170,9 @@ async function matchKnowledgeTags(detectedTags: string[]): Promise<string[]> {
   const matchedIds: string[] = [];
 
   for (const tagName of detectedTags) {
-    // 尝试匹配五级标签
     const tags = await prisma.knowledgeTag.findMany({
       where: {
-        OR: [
-          { name: { contains: tagName } },
-          { skill: { contains: tagName } },
-          { knowledge: { contains: tagName } },
-        ],
+        name: { contains: tagName },
       },
       take: 5,
     });

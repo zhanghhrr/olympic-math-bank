@@ -8,7 +8,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
 import { QuestionStatus, Grade } from '@prisma/client';
-import { autoMatchKnowledgeTags, detectQuestionType, estimateDifficulty, stripQuestionNumber } from '@/lib/ocr/import-to-db';
+import { autoMatchKnowledgeTagsWithLLM, detectQuestionType, estimateDifficulty, stripQuestionNumber } from '@/lib/ocr/import-to-db';
+import { HybridQuestionIdentifier } from '@/lib/ocr/question-identifier';
+import { verifyFormulasFromJson, serializeVerifiedFormulas } from '@/lib/ocr/formula-verifier';
 
 interface QuestionPreview {
   tempId?: string;
@@ -20,6 +22,8 @@ interface QuestionPreview {
   grade: string;
   source: string;
   matchedTags: Array<{ id: string; name: string; path: string }>;
+  formulas?: string;
+  sourceBlocks?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -71,7 +75,7 @@ export async function POST(request: NextRequest) {
         } else {
           try {
             const combinedContent = [q.content, q.answer, q.solution].join(' ');
-            matchedTagIds = await autoMatchKnowledgeTags(combinedContent);
+            matchedTagIds = await autoMatchKnowledgeTagsWithLLM(combinedContent);
             console.log(`[Confirm Import] 自动匹配标签 ${matchedTagIds.length} 个`);
           } catch (tagError) {
             console.error('[Confirm Import] 自动打标签失败:', tagError);
@@ -82,10 +86,22 @@ export async function POST(request: NextRequest) {
         const cleanedContent = stripQuestionNumber(q.content);
 
         // 确定题目类型
-        const questionType = detectQuestionType(q.content);
+        const questionType = HybridQuestionIdentifier.questionTypeToDB(detectQuestionType(q.content));
 
         // 估算难度
         const difficulty = estimateDifficulty(q.content);
+
+        let verifiedFormulas = q.formulas || null;
+        if (q.formulas) {
+          try {
+            const verifyResult = verifyFormulasFromJson(q.formulas);
+            if (verifyResult) {
+              verifiedFormulas = serializeVerifiedFormulas(verifyResult);
+            }
+          } catch {
+            verifiedFormulas = q.formulas;
+          }
+        }
 
         // 创建题目
         const question = await prisma.question.create({
@@ -99,6 +115,8 @@ export async function POST(request: NextRequest) {
             source: q.source || 'OCR导入',
             status: QuestionStatus.PENDING,
             createdById: userId,
+            formulas: verifiedFormulas,
+            sourceBlocks: q.sourceBlocks || null,
           },
         });
 

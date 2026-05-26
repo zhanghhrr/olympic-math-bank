@@ -90,6 +90,9 @@ model Question {
   year            Int?            // 年份
   competition     String?         // 竞赛类型
   status          QuestionStatus  @default(DRAFT)
+  formulas        String?         // JSON: [{latex, bbox, page, verifyStatus}] 公式列表
+  sourceBlocks    String?         // JSON: [{type, text, bbox, pageIdx}] 原始OCR Block
+  sourcePdfName   String?         // 来源PDF文件名（用于公式比对截图定位原文件）
   
   // 外键
   createdById     String
@@ -120,6 +123,8 @@ model QuestionVersion {
   answer      String
   solution    String?
   options     String?   // JSON string for SQLite
+  formulas    String?   // JSON: 公式列表快照
+  sourceBlocks String?  // JSON: OCR Block 快照
   changeLog   String    // 修改说明
   createdById String
   createdBy   User      @relation(fields: [createdById], references: [id])

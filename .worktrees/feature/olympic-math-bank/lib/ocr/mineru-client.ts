@@ -4,6 +4,9 @@
  *
  * 注：原始的 Python 实现已备份到 scripts/web_pdf_converter.py
  * 此 TypeScript 版本是基于 Python 实现的移植
+ *
+ * v2: 新增 _content_list.json 解析，输出结构化 Block
+ *    为后续公式校验和题目区域归属提供结构化数据
  */
 
 import * as fs from 'fs';
@@ -17,10 +20,35 @@ const MINERU_BASE_URL = 'https://opendatalab-mineru.ms.show';
 // 创建识别器实例
 const questionIdentifier = new HybridQuestionIdentifier();
 
+export interface ContentBlock {
+  type: 'text' | 'list' | 'image' | 'table' | 'formula';
+  text: string;
+  textLevel?: number;
+  bbox: [number, number, number, number];
+  pageIdx: number;
+  subType?: string;
+  listItems?: string[];
+  imgPath?: string;
+  imageCaption?: string[];
+  imageFootnote?: string[];
+}
+
+export interface ContentFormula {
+  latex: string;
+  bbox: [number, number, number, number];
+  page: number;
+}
+
+export interface StructuredOcrData {
+  blocks: ContentBlock[];
+  formulas: ContentFormula[];
+}
+
 export interface MinerUResult {
   success: boolean;
   markdownContent?: string;
   questions?: ParsedQuestion[];
+  structuredData?: StructuredOcrData;
   error?: string;
 }
 
@@ -306,17 +334,130 @@ function readMarkdownContent(extractDir: string): string {
 }
 
 /**
+ * 从解压目录读取 _content_list.json
+ * 提取所有结构化 Block（含 BBox、类型、页码）
+ */
+function readContentListJson(extractDir: string): ContentBlock[] | null {
+  try {
+    const files = fs.readdirSync(extractDir);
+    const jsonFile = files.find(f => f.endsWith('_content_list.json'));
+
+    if (!jsonFile) {
+      console.log('  [MinerU] 未找到 _content_list.json，跳过结构化提取');
+      return null;
+    }
+
+    const raw = fs.readFileSync(path.join(extractDir, jsonFile), 'utf-8');
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed.map((item: any) => ({
+      type: item.type || 'text',
+      text: item.text || '',
+      textLevel: item.text_level,
+      bbox: item.bbox || [0, 0, 0, 0],
+      pageIdx: item.page_idx ?? 0,
+      subType: item.sub_type,
+      listItems: item.list_items,
+      imgPath: item.img_path,
+      imageCaption: item.image_caption,
+      imageFootnote: item.image_footnote,
+    }));
+  } catch (error) {
+    console.error('  [MinerU] 读取 _content_list.json 失败:', error);
+    return null;
+  }
+}
+
+/**
+ * LaTeX 公式匹配模式
+ * 匹配 MinerU 输出的 \(...\) 和 \[...\] 格式
+ */
+const LATEX_INLINE = /\\\(([^]*?)\\\)/g;
+const LATEX_DISPLAY = /\\\[([^]*?)\\\]/g;
+
+/**
+ * 从 ContentBlock 数组中提取所有公式及其 BBox
+ * 公式在 MinerU 输出中被包裹在 \(...\) 或 \[...\] 中
+ */
+function extractFormulasFromBlocks(blocks: ContentBlock[]): ContentFormula[] {
+  const formulas: ContentFormula[] = [];
+
+  for (const block of blocks) {
+    if (block.type !== 'text' && block.type !== 'list') continue;
+
+    const text = block.type === 'list'
+      ? (block.listItems || []).join('\n')
+      : block.text;
+
+    let match: RegExpExecArray | null;
+
+    LATEX_DISPLAY.lastIndex = 0;
+    while ((match = LATEX_DISPLAY.exec(text)) !== null) {
+      formulas.push({
+        latex: match[1].trim(),
+        bbox: [...block.bbox] as [number, number, number, number],
+        page: block.pageIdx,
+      });
+    }
+
+    LATEX_INLINE.lastIndex = 0;
+    while ((match = LATEX_INLINE.exec(text)) !== null) {
+      formulas.push({
+        latex: match[1].trim(),
+        bbox: [...block.bbox] as [number, number, number, number],
+        page: block.pageIdx,
+      });
+    }
+
+    if (block.type === 'list' && block.listItems) {
+      for (const item of block.listItems) {
+        LATEX_INLINE.lastIndex = 0;
+        while ((match = LATEX_INLINE.exec(item)) !== null) {
+          formulas.push({
+            latex: match[1].trim(),
+            bbox: [...block.bbox] as [number, number, number, number],
+            page: block.pageIdx,
+          });
+        }
+      }
+    }
+  }
+
+  return formulas;
+}
+
+/**
+ * 读取结构化 OCR 数据（_content_list.json → 结构化 Blocks + 公式列表）
+ */
+function readStructuredData(extractDir: string): StructuredOcrData | null {
+  const blocks = readContentListJson(extractDir);
+  if (!blocks) return null;
+
+  const formulas = extractFormulasFromBlocks(blocks);
+  return { blocks, formulas };
+}
+
+/**
  * 从markdown内容提取题目
  * 使用 HybridQuestionIdentifier 进行智能识别
+ * @param markdown MinerU 输出的 Markdown 文本
+ * @param structuredData 可选的结构化 OCR 数据（_content_list.json），用于增强分块和公式关联
  */
-function extractQuestionsFromMarkdown(markdown: string): ParsedQuestion[] {
+function extractQuestionsFromMarkdown(
+  markdown: string,
+  structuredData?: StructuredOcrData | null
+): ParsedQuestion[] {
   console.log('[MinerU Client] 使用智能分割模式识别题目...');
   
   // 使用 HybridQuestionIdentifier 进行智能分割
   const blocks = questionIdentifier.splitContent(markdown);
   console.log(`[MinerU Client] 识别到 ${blocks.length} 个文本块`);
   
-  // 转换为标准题目格式
+  // 转换为标准题目格式，传入结构化数据以关联公式和 BBox
   const questions = questionIdentifier.convertToQuestions(blocks);
   console.log(`[MinerU Client] 提取到 ${questions.length} 道有效题目`);
   
@@ -379,8 +520,14 @@ export async function processPDF(
     fs.writeFileSync(markdownSavePath, markdownContent, 'utf-8');
     console.log(`  [MinerU] 原始内容已保存: ${markdownSavePath}`);
 
-    // 7. 提取题目
-    const questions = extractQuestionsFromMarkdown(markdownContent);
+    // 7. 读取结构化数据（_content_list.json）
+    const structuredData = readStructuredData(extractDir);
+    if (structuredData) {
+      console.log(`  [MinerU] 结构化数据: ${structuredData.blocks.length} 个 Block, ${structuredData.formulas.length} 个公式`);
+    }
+
+    // 8. 提取题目（传入结构化数据用于增强分块）
+    const questions = extractQuestionsFromMarkdown(markdownContent, structuredData);
 
     console.log(`  [MinerU] 识别完成，共 ${questions.length} 道题目`);
 
@@ -388,6 +535,7 @@ export async function processPDF(
       success: true,
       markdownContent,
       questions,
+      structuredData: structuredData ?? undefined,
     };
   } catch (error) {
     return {
