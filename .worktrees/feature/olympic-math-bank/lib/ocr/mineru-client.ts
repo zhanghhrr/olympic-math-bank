@@ -1,24 +1,118 @@
 /**
- * MinerU OCR 客户端
- * 使用 HybridQuestionIdentifier 进行智能题目识别
+ * MinerU v4 官方 API 客户端 (Final)
  *
- * 注：原始的 Python 实现已备份到 scripts/web_pdf_converter.py
- * 此 TypeScript 版本是基于 Python 实现的移植
+ * 基于 MinerU 官方 Precision Extract API (v4)
+ * 文档: https://mineru.net/apiManage/docs
  *
- * v2: 新增 _content_list.json 解析，输出结构化 Block
- *    为后续公式校验和题目区域归属提供结构化数据
+ * 流程:
+ *   方案A (批量自动任务):
+ *     1. POST /api/v4/file-urls/batch → 签名上传URL → PUT 文件到 OSS
+ *     2. 系统自动创建提取任务
+ *     3. 轮询 GET /api/v4/extract/task/{task_id} 获取结果
+ *     4. 下载 ZIP → 解压 → 读取 MD + JSON
+ *
+ *   方案B (公共 URL) - 生产环境:
+ *     1. 文件保存到 public/ 目录
+ *     2. POST /api/v4/extract/task {url, model:'vlm', is_ocr:true} 提交
+ *     3. 轮询 GET /api/v4/extract/task/{task_id}
+ *     4. 下载 ZIP → 解压 → 读取 MD + JSON
+ *
+ * 强制启用 VLM 模型 + OCR，确保最高识别精度。
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import axios from 'axios';
-import FormData from 'form-data';
 import { HybridQuestionIdentifier, type ParsedQuestion } from './question-identifier';
 
-const MINERU_BASE_URL = 'https://opendatalab-mineru.ms.show';
+const MINERU_BASE_URL = 'https://mineru.net';
+const MINERU_API_TOKEN = process.env.MINERU_API_TOKEN || '';
 
-// 创建识别器实例
+if (!MINERU_API_TOKEN) {
+  console.warn('[MinerU v4]  MINERU_API_TOKEN 环境变量未设置');
+}
+
+const AUTH_HEADER = {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${MINERU_API_TOKEN}`,
+};
+
 const questionIdentifier = new HybridQuestionIdentifier();
+
+const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL || 'http://localhost:3000';
+
+// ============================================================
+// 临时文件托管（为本地开发提供可公开访问的URL）
+// ============================================================
+
+/**
+ * 上传文件到临时托管服务，获取公开URL
+ * 用于本地开发环境（localhost 对外不可达时）
+ */
+async function uploadToTmpHost(filePath: string): Promise<string | null> {
+  const fileName = path.basename(filePath);
+
+  // 尝试 tmpfiles.org（最大 100MB）
+  try {
+    console.log('  [MinerU v4] 尝试上传到临时托管...');
+    const FormDataLib = require('form-data');
+    const form = new FormDataLib();
+    form.append('file', fs.createReadStream(filePath), fileName);
+
+    const resp = await axios.post('https://tmpfiles.org/api/v1/upload', form, {
+      headers: { ...form.getHeaders() },
+      timeout: 60000,
+      maxContentLength: 100 * 1024 * 1024,
+    });
+
+    if (resp.data?.data?.url) {
+      const url = resp.data.data.url.replace('tmpfiles.org/', 'tmpfiles.org/dl/');
+      console.log(`  [MinerU v4] 临时托管URL: ${url}`);
+      return url;
+    }
+  } catch (e) {
+    console.log(`  [MinerU v4] tmpfiles.org 上传失败: ${e instanceof Error ? e.message : '未知'}`);
+  }
+
+  // 尝试 file.io
+  try {
+    const FormDataLib = require('form-data');
+    const form = new FormDataLib();
+    form.append('file', fs.createReadStream(filePath), fileName);
+
+    const resp = await axios.post('https://file.io', form, {
+      headers: { ...form.getHeaders() },
+      timeout: 60000,
+      maxContentLength: 100 * 1024 * 1024,
+    });
+
+    if (resp.data?.link) {
+      console.log(`  [MinerU v4] file.io URL: ${resp.data.link}`);
+      return resp.data.link;
+    }
+  } catch (e) {
+    console.log(`  [MinerU v4] file.io 上传失败: ${e instanceof Error ? e.message : '未知'}`);
+  }
+
+  console.log('  [MinerU v4] 临时托管服务不可用，回退到本地public/目录');
+  return null;
+}
+
+// ============================================================
+// 类型定义
+// ============================================================
+
+export interface MinerUOptions {
+  model_version?: 'pipeline' | 'vlm' | 'MinerU-HTML';
+  is_ocr?: boolean;
+  enable_formula?: boolean;
+  enable_table?: boolean;
+  language?: string;
+  data_id?: string;
+  page_ranges?: string;
+  extra_formats?: string[];
+}
 
 export interface ContentBlock {
   type: 'text' | 'list' | 'image' | 'table' | 'formula';
@@ -50,309 +144,277 @@ export interface MinerUResult {
   questions?: ParsedQuestion[];
   structuredData?: StructuredOcrData;
   error?: string;
+  elapsed?: number;
+  pages?: number;
+  savedDir?: string;
 }
 
-// 重新导出 ParsedQuestion 类型
 export { ParsedQuestion };
 
-/**
- * 生成随机session hash
- */
-function generateSessionHash(length: number = 10): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
+// ============================================================
+// 内部类型
+// ============================================================
+
+interface TaskCreateResponse {
+  code: number;
+  msg: string;
+  data: { task_id: string };
 }
 
-/**
- * 上传PDF文件到MinerU
- */
-async function uploadPDF(filePath: string): Promise<string | null> {
+interface TaskStatusResponse {
+  code: number;
+  msg: string;
+  data: {
+    task_id: string;
+    state: 'done' | 'pending' | 'running' | 'failed' | 'converting';
+    full_zip_url?: string;
+    err_msg?: string;
+    extract_progress?: {
+      extracted_pages: number;
+      total_pages: number;
+      start_time: string;
+    };
+  };
+}
+
+// ============================================================
+// 方案B: 单文件 API（需要文件有公开可访问的 URL）
+// ============================================================
+
+async function createTaskViaUrl(
+  fileUrl: string,
+  options: MinerUOptions,
+): Promise<string | null> {
   try {
-    console.log('  [MinerU] 上传文件...');
-    
-    const formData = new FormData();
-    formData.append('files', fs.createReadStream(filePath), {
-      filename: path.basename(filePath),
-      contentType: 'application/pdf',
-    });
-    
-    const uploadUrl = `${MINERU_BASE_URL}/gradio_api/upload`;
-    
-    const response = await axios.post(uploadUrl, formData, {
-      headers: {
-        ...formData.getHeaders(),
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://opendatalab-mineru.ms.show/',
-        'Origin': 'https://opendatalab-mineru.ms.show',
-      },
-      timeout: 60000,
-    });
-    
-    if (response.status === 200) {
-      const data = response.data;
-      if (Array.isArray(data) && data.length > 0) {
-        console.log('  [MinerU] 上传成功');
-        return data[0];
-      } else if (data && data.path) {
-        console.log('  [MinerU] 上传成功');
-        return data.path;
-      }
+    const payload: Record<string, unknown> = {
+      url: fileUrl,
+      model_version: options.model_version || 'vlm',
+      is_ocr: options.is_ocr ?? true,
+      enable_formula: options.enable_formula ?? true,
+      enable_table: options.enable_table ?? true,
+      language: options.language || 'ch',
+    };
+    if (options.data_id) payload.data_id = options.data_id;
+    if (options.page_ranges) payload.page_ranges = options.page_ranges;
+    if (options.extra_formats) payload.extra_formats = options.extra_formats;
+
+    const resp = await axios.post<TaskCreateResponse>(
+      `${MINERU_BASE_URL}/api/v4/extract/task`,
+      payload,
+      { headers: AUTH_HEADER, timeout: 30000 },
+    );
+
+    if (resp.data.code === 0) {
+      return resp.data.data.task_id;
     }
-    
-    console.error('  [MinerU] 上传响应格式错误:', response.data);
+    console.error('  [MinerU v4] 创建任务失败:', resp.data);
     return null;
   } catch (error) {
-    console.error('  [MinerU] 上传失败:', error instanceof Error ? error.message : '未知错误');
+    console.error('  [MinerU v4] 创建任务异常:', error instanceof Error ? error.message : '未知错误');
     return null;
   }
 }
 
-/**
- * 调用MinerU预测接口
- */
-async function predictPDF(serverFilePath: string, fileName: string, fileSize: number): Promise<any> {
+// ============================================================
+// 方案A: 批量上传 API
+// ============================================================
+
+async function requestUploadUrl(
+  fileName: string,
+  options: MinerUOptions,
+): Promise<{ batch_id: string; signedUrl: string; fileUuid: string } | null> {
   try {
-    console.log('  [MinerU] 开始识别...');
-    
-    const sessionHash = generateSessionHash();
-    
-    // 构造文件参数
-    const fileArg = {
-      path: serverFilePath,
-      url: `${MINERU_BASE_URL}/file=${serverFilePath}`,
-      orig_name: fileName,
-      size: fileSize,
-      mime_type: 'application/pdf',
-      meta: { _type: 'gradio.FileData' }
-    };
-    
-    // 构造payload (fn_index=8)
     const payload = {
-      data: [
-        fileArg,                                      // ID 5: File
-        20,                                           // ID 8: Max pages
-        false,                                        // ID 24: Force OCR
-        true,                                         // ID 20: Formula Hybrid
-        true,                                         // ID 19: Table Enable
-        'ch (Chinese, English, Chinese Traditional)', // ID 23: OCR Language
-        'vlm-auto-engine',                            // ID 11: Backend
-        'http://localhost:30000'                      // ID 14: Server URL
-      ],
-      event_data: null,
-      fn_index: 8,
-      session_hash: sessionHash
+      files: [{ name: fileName, data_id: options.data_id || `task-${Date.now()}` }],
+      model_version: options.model_version || 'vlm',
     };
-    
-    const joinParams = {
-      t: Date.now().toString(),
-      __theme: 'dark',
-      backend_url: '/'
-    };
-    
-    const predictUrl = `${MINERU_BASE_URL}/gradio_api/queue/join`;
-    
-    const response = await axios.post(predictUrl, payload, {
-      params: joinParams,
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://opendatalab-mineru.ms.show/',
-      },
+
+    const resp = await axios.post(
+      `${MINERU_BASE_URL}/api/v4/file-urls/batch`,
+      payload,
+      { headers: AUTH_HEADER, timeout: 30000 },
+    );
+
+    if (resp.data?.code !== 0) {
+      console.error('  [MinerU v4] 获取上传URL失败:', resp.data);
+      return null;
+    }
+
+    const batchId: string = resp.data.data.batch_id;
+    const signedUrl: string = resp.data.data.file_urls?.[0];
+    if (!signedUrl) return null;
+
+    // 从 OSS URL 提取文件 UUID (batch_id 后的 UUID)
+    const urlParts = signedUrl.split('/');
+    const fileUuid = urlParts[urlParts.length - 1].split('?')[0].replace('.pdf', '');
+
+    console.log(`  [MinerU v4] batch_id: ${batchId}`);
+
+    return { batch_id: batchId, signedUrl, fileUuid };
+  } catch (error) {
+    console.error('  [MinerU v4] 请求上传URL异常:', error instanceof Error ? error.message : '未知错误');
+    return null;
+  }
+}
+
+async function uploadFile(
+  filePath: string,
+  signedUrl: string,
+): Promise<boolean> {
+  try {
+    const fileBuffer = fs.readFileSync(filePath);
+    const resp = await fetch(signedUrl, {
+      method: 'PUT',
+      body: fileBuffer,
+      headers: {},
+    });
+
+    if (resp.ok) {
+      console.log('  [MinerU v4] 文件上传成功');
+      return true;
+    }
+    console.error('  [MinerU v4] 文件上传失败:', resp.status);
+    return false;
+  } catch (error) {
+    console.error('  [MinerU v4] 文件上传异常:', error instanceof Error ? error.message : '未知错误');
+    return false;
+  }
+}
+
+// ============================================================
+// 轮询任务
+// ============================================================
+
+async function pollTask(
+  taskId: string,
+  timeoutMs: number = 600000,
+): Promise<TaskStatusResponse['data'] | null> {
+  const pollInterval = 3000;
+  const startTime = Date.now();
+
+  console.log(`  [MinerU v4] 轮询任务: ${taskId}`);
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const resp = await axios.get<TaskStatusResponse>(
+        `${MINERU_BASE_URL}/api/v4/extract/task/${taskId}`,
+        { headers: AUTH_HEADER, timeout: 15000 },
+      );
+
+      if (resp.data?.code !== 0) {
+        if (resp.data?.code === -60012) {
+          console.log('  [MinerU v4] 任务尚未创建，继续等待...');
+          await new Promise(r => setTimeout(r, pollInterval));
+          continue;
+        }
+        console.error('  [MinerU v4] 查询失败:', resp.data);
+        return null;
+      }
+
+      const td = resp.data.data;
+      switch (td.state) {
+        case 'done':
+          console.log('  [MinerU v4] 任务完成');
+          return td;
+        case 'failed':
+          console.error('  [MinerU v4] 任务失败:', td.err_msg || '未知');
+          return null;
+        case 'running':
+          if (td.extract_progress) {
+            console.log(`  [MinerU v4] 进度: ${td.extract_progress.extracted_pages}/${td.extract_progress.total_pages} 页`);
+          }
+          break;
+      }
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.log('  [MinerU v4] 任务未找到，继续等待...');
+      } else {
+        console.error('  [MinerU v4] 轮询异常:', error instanceof Error ? error.message : '未知错误');
+      }
+    }
+
+    await new Promise(r => setTimeout(r, pollInterval));
+  }
+
+  console.error(`  [MinerU v4] 任务轮询超时 (${timeoutMs / 1000}s)`);
+  return null;
+}
+
+// ============================================================
+// 结果下载与解析
+// ============================================================
+
+async function downloadAndExtract(
+  zipUrl: string,
+  outputDir: string,
+  fileName: string,
+): Promise<string | null> {
+  try {
+    console.log('  [MinerU v4] 下载结果ZIP...');
+    const resp = await axios.get(zipUrl, {
+      responseType: 'arraybuffer',
       timeout: 120000,
     });
-    
-    if (response.status === 200) {
-      const result = response.data;
-      const eventId = result.event_id;
-      
-      if (eventId) {
-        console.log(`  [MinerU] 任务已提交 (Event ID: ${eventId})`);
-        // 等待结果
-        return await waitForResult(sessionHash, eventId);
-      }
-    }
-    
-    console.error('  [MinerU] 预测失败:', response.status);
-    return null;
-  } catch (error) {
-    console.error('  [MinerU] 预测失败:', error instanceof Error ? error.message : '未知错误');
-    return null;
-  }
-}
 
-/**
- * 等待MinerU处理结果
- */
-async function waitForResult(sessionHash: string, eventId: string): Promise<any> {
-  const dataUrl = `${MINERU_BASE_URL}/gradio_api/queue/data`;
-  const maxAttempts = 60; // 最多等待60秒
-  
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const zipPath = path.join(outputDir, `${fileName}.zip`);
+    const extractDir = path.join(outputDir, fileName);
+    fs.writeFileSync(zipPath, Buffer.from(resp.data));
+    if (!fs.existsSync(extractDir)) fs.mkdirSync(extractDir, { recursive: true });
+
+    console.log('  [MinerU v4] 解压...');
     try {
-      const response = await axios.get(dataUrl, {
-        params: {
-          session_hash: sessionHash,
-          studio_token: ''
-        },
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        timeout: 30000,
-        responseType: 'text',
-      });
-      
-      const lines = response.data.split('\n');
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const msg = JSON.parse(line.substring(6));
-            
-            if (msg.msg === 'process_completed') {
-              return msg;
-            } else if (msg.msg === 'process_failed') {
-              console.error('  [MinerU] 处理失败:', msg);
-              return null;
-            }
-          } catch (e) {
-            // 忽略解析错误
-          }
-        }
+      if (process.platform === 'win32') {
+        execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${extractDir}' -Force"`, { stdio: 'ignore' });
+      } else {
+        execSync(`unzip -o "${zipPath}" -d "${extractDir}"`, { stdio: 'ignore' });
       }
-      
-      // 等待1秒后重试
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (error) {
-      console.error(`  [MinerU] 获取结果失败 (尝试 ${attempt + 1}/${maxAttempts}):`, 
-        error instanceof Error ? error.message : '未知错误');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch {
+      // JSZip fallback
+      const zipData = fs.readFileSync(zipPath);
+      const JSZip = require('jszip');
+      const zip = await JSZip.loadAsync(zipData);
+      for (const [name, entry] of Object.entries(zip.files)) {
+        const ze = entry as { dir: boolean; async: (t: string) => Promise<Buffer> };
+        if (ze.dir) continue;
+        const content = await ze.async('nodebuffer');
+        const fp = path.join(extractDir, name);
+        const d = path.dirname(fp);
+        if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(fp, content);
+      }
     }
-  }
-  
-  console.error('  [MinerU] 等待结果超时');
-  return null;
-}
 
-/**
- * 从MinerU结果中提取zip文件URL
- */
-function extractZipUrl(result: any): string | null {
-  if (!result || !result.output || !result.output.data) {
-    return null;
-  }
-  
-  const dataList = result.output.data;
-  
-  for (const item of dataList) {
-    if (typeof item === 'object') {
-      // 检查是否是文件更新指令
-      if (item.__type__ === 'update' && item.value) {
-        const value = Array.isArray(item.value) ? item.value[0] : item.value;
-        if (value && (value.orig_name?.endsWith('.zip') || value.path?.endsWith('.zip'))) {
-          return value.url || `${MINERU_BASE_URL}/file=${value.path}`;
-        }
-      }
-      // 旧格式兼容
-      if (item.path && (item.orig_name?.endsWith('.zip') || item.path?.endsWith('.zip'))) {
-        return item.url || `${MINERU_BASE_URL}/file=${item.path}`;
-      }
-    }
-  }
-  
-  return null;
-}
-
-/**
- * 下载并解压结果
- */
-async function downloadResult(zipUrl: string, outputDir: string, fileName: string): Promise<string | null> {
-  try {
-    console.log('  [MinerU] 下载结果...');
-    
-    const response = await axios.get(zipUrl, {
-      responseType: 'arraybuffer',
-      timeout: 60000,
-    });
-    
-    if (response.status === 200) {
-      // 保存zip文件
-      const zipPath = path.join(outputDir, `${fileName}.zip`);
-      fs.writeFileSync(zipPath, response.data);
-      
-      // 解压
-      const extractDir = path.join(outputDir, fileName);
-      if (!fs.existsSync(extractDir)) {
-        fs.mkdirSync(extractDir, { recursive: true });
-      }
-      
-      // 使用系统unzip命令解压
-      const { execSync } = require('child_process');
-      execSync(`unzip -o "${zipPath}" -d "${extractDir}"`, { stdio: 'ignore' });
-      
-      // 删除zip文件
-      fs.unlinkSync(zipPath);
-      
-      console.log('  [MinerU] 下载完成');
-      return extractDir;
-    }
-    
-    return null;
+    fs.unlinkSync(zipPath);
+    console.log('  [MinerU v4] 解压完成');
+    return extractDir;
   } catch (error) {
-    console.error('  [MinerU] 下载失败:', error instanceof Error ? error.message : '未知错误');
+    console.error('  [MinerU v4] 下载解压失败:', error instanceof Error ? error.message : '未知错误');
     return null;
   }
 }
 
-/**
- * 从解压后的目录读取markdown内容
- */
-function readMarkdownContent(extractDir: string): string {
+function readMarkdown(extractDir: string): string {
   try {
-    // 查找markdown文件
     const files = fs.readdirSync(extractDir);
-    const mdFile = files.find(f => f.endsWith('.md'));
-    
-    if (mdFile) {
-      return fs.readFileSync(path.join(extractDir, mdFile), 'utf-8');
-    }
-    
-    // 如果没有md文件，查找txt文件
+    const mdFile = files.find(f => f.endsWith('.md') || f === 'full.md');
+    if (mdFile) return fs.readFileSync(path.join(extractDir, mdFile), 'utf-8');
     const txtFile = files.find(f => f.endsWith('.txt'));
-    if (txtFile) {
-      return fs.readFileSync(path.join(extractDir, txtFile), 'utf-8');
-    }
-    
+    if (txtFile) return fs.readFileSync(path.join(extractDir, txtFile), 'utf-8');
     return '';
-  } catch (error) {
-    console.error('  [MinerU] 读取结果失败:', error);
+  } catch {
     return '';
   }
 }
 
-/**
- * 从解压目录读取 _content_list.json
- * 提取所有结构化 Block（含 BBox、类型、页码）
- */
 function readContentListJson(extractDir: string): ContentBlock[] | null {
   try {
     const files = fs.readdirSync(extractDir);
     const jsonFile = files.find(f => f.endsWith('_content_list.json'));
-
-    if (!jsonFile) {
-      console.log('  [MinerU] 未找到 _content_list.json，跳过结构化提取');
-      return null;
-    }
+    if (!jsonFile) return null;
 
     const raw = fs.readFileSync(path.join(extractDir, jsonFile), 'utf-8');
     const parsed = JSON.parse(raw);
-
-    if (!Array.isArray(parsed)) {
-      return null;
-    }
+    if (!Array.isArray(parsed)) return null;
 
     return parsed.map((item: any) => ({
       type: item.type || 'text',
@@ -366,59 +428,33 @@ function readContentListJson(extractDir: string): ContentBlock[] | null {
       imageCaption: item.image_caption,
       imageFootnote: item.image_footnote,
     }));
-  } catch (error) {
-    console.error('  [MinerU] 读取 _content_list.json 失败:', error);
+  } catch {
     return null;
   }
 }
 
-/**
- * LaTeX 公式匹配模式
- * 匹配 MinerU 输出的 \(...\) 和 \[...\] 格式
- */
-const LATEX_INLINE = /\\\(([^]*?)\\\)/g;
-const LATEX_DISPLAY = /\\\[([^]*?)\\\]/g;
+// 支持 MinerU 输出的两种 LaTeX 格式: $$...$$ 和 $...$
+const LATEX_DISPLAY_DOLLAR = /\$\$([^]*?)\$\$/g;
+const LATEX_INLINE_DOLLAR = /\$([^$]+?)\$/g;
 
-/**
- * 从 ContentBlock 数组中提取所有公式及其 BBox
- * 公式在 MinerU 输出中被包裹在 \(...\) 或 \[...\] 中
- */
 function extractFormulasFromBlocks(blocks: ContentBlock[]): ContentFormula[] {
   const formulas: ContentFormula[] = [];
+  const seen = new Set<string>();
 
   for (const block of blocks) {
     if (block.type !== 'text' && block.type !== 'list') continue;
+    const text = block.type === 'list' ? (block.listItems || []).join('\n') : block.text;
 
-    const text = block.type === 'list'
-      ? (block.listItems || []).join('\n')
-      : block.text;
-
-    let match: RegExpExecArray | null;
-
-    LATEX_DISPLAY.lastIndex = 0;
-    while ((match = LATEX_DISPLAY.exec(text)) !== null) {
-      formulas.push({
-        latex: match[1].trim(),
-        bbox: [...block.bbox] as [number, number, number, number],
-        page: block.pageIdx,
-      });
-    }
-
-    LATEX_INLINE.lastIndex = 0;
-    while ((match = LATEX_INLINE.exec(text)) !== null) {
-      formulas.push({
-        latex: match[1].trim(),
-        bbox: [...block.bbox] as [number, number, number, number],
-        page: block.pageIdx,
-      });
-    }
-
-    if (block.type === 'list' && block.listItems) {
-      for (const item of block.listItems) {
-        LATEX_INLINE.lastIndex = 0;
-        while ((match = LATEX_INLINE.exec(item)) !== null) {
+    for (const re of [LATEX_DISPLAY_DOLLAR, LATEX_INLINE_DOLLAR]) {
+      re.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(text)) !== null) {
+        const latex = match[1].trim();
+        const key = latex.replace(/\s+/g, '');
+        if (!seen.has(key) && latex.length > 1) {
+          seen.add(key);
           formulas.push({
-            latex: match[1].trim(),
+            latex,
             bbox: [...block.bbox] as [number, number, number, number],
             page: block.pageIdx,
           });
@@ -426,121 +462,353 @@ function extractFormulasFromBlocks(blocks: ContentBlock[]): ContentFormula[] {
       }
     }
   }
-
   return formulas;
 }
 
-/**
- * 读取结构化 OCR 数据（_content_list.json → 结构化 Blocks + 公式列表）
- */
 function readStructuredData(extractDir: string): StructuredOcrData | null {
   const blocks = readContentListJson(extractDir);
   if (!blocks) return null;
-
   const formulas = extractFormulasFromBlocks(blocks);
   return { blocks, formulas };
 }
 
-/**
- * 从markdown内容提取题目
- * 使用 HybridQuestionIdentifier 进行智能识别
- * @param markdown MinerU 输出的 Markdown 文本
- * @param structuredData 可选的结构化 OCR 数据（_content_list.json），用于增强分块和公式关联
- */
-function extractQuestionsFromMarkdown(
-  markdown: string,
-  structuredData?: StructuredOcrData | null
-): ParsedQuestion[] {
-  console.log('[MinerU Client] 使用智能分割模式识别题目...');
-  
-  // 使用 HybridQuestionIdentifier 进行智能分割
-  const blocks = questionIdentifier.splitContent(markdown);
-  console.log(`[MinerU Client] 识别到 ${blocks.length} 个文本块`);
-  
-  // 转换为标准题目格式，传入结构化数据以关联公式和 BBox
+function saveAllOutputFiles(extractDir: string, outputDir: string, baseName: string): void {
+  try {
+    const files = fs.readdirSync(extractDir);
+    for (const file of files) {
+      const src = path.join(extractDir, file);
+      if (fs.statSync(src).isFile()) {
+        const dest = path.join(outputDir, `${baseName}-${file}`);
+        fs.copyFileSync(src, dest);
+      }
+    }
+    console.log(`  [MinerU v4] 输出文件已保存: ${outputDir}/${baseName}-*`);
+  } catch (error) {
+    console.error('  [MinerU v4] 保存输出文件失败:', error);
+  }
+}
+
+function extractQuestions(md: string, structured?: StructuredOcrData | null): ParsedQuestion[] {
+  const blocks = questionIdentifier.splitContent(md);
   const questions = questionIdentifier.convertToQuestions(blocks);
-  console.log(`[MinerU Client] 提取到 ${questions.length} 道有效题目`);
-  
+
+  // 从原始 MD 提取章节标题和标注文本，注入到每个题目的 title 中
+  enrichQuestionsWithSectionTitles(md, questions);
+
+  if (structured && questions.length > 0) {
+    bridgeStructuredData(questions, structured);
+  }
+
+  console.log(`  [MinerU v4] 识别到 ${questions.length} 道题`);
   return questions;
 }
 
 /**
- * 处理PDF文件（主函数）
+ * 从原始 MD 中提取章节标题（如 "# 一、等差数列"）和标注文本（如 "【标注】【拓展思维】等差数列截断求和"），
+ * 根据题目在 MD 中的位置匹配到对应的 ParsedQuestion.title
+ */
+function enrichQuestionsWithSectionTitles(md: string, questions: ParsedQuestion[]): void {
+  const lines = md.split('\n');
+
+  // 扫描所有章节标题位置和名称
+  interface SectionInfo {
+    lineIndex: number;
+    name: string;
+    annotationHints: string[];
+  }
+  const sections: SectionInfo[] = [];
+  const sectionHeaderRe = /^#{1,3}\s*[(（]?[一二三四五六七八九十]+[)）]?[、，]?\s*(.+)$/;
+  const annotationRe = /【标注】(?:【[^】]+】)*(.+)$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const headerMatch = trimmed.match(sectionHeaderRe);
+    if (headerMatch) {
+      sections.push({
+        lineIndex: i,
+        name: headerMatch[1].trim(),
+        annotationHints: [],
+      });
+    }
+  }
+
+  if (sections.length === 0) return;
+
+  // 为每个段落收集标注文本
+  for (let si = 0; si < sections.length; si++) {
+    const currentSection = sections[si];
+    const nextSectionLine = sections[si + 1]?.lineIndex ?? lines.length;
+    for (let li = currentSection.lineIndex + 1; li < nextSectionLine; li++) {
+      const annotationMatch = lines[li].trim().match(annotationRe);
+      if (annotationMatch) {
+        currentSection.annotationHints.push(annotationMatch[1].trim());
+      }
+    }
+  }
+
+  // 为每道题匹配所属章节
+  for (const q of questions) {
+    // 用题干前 80 字符在原 MD 中定位行号
+    const searchText = q.content.replace(/\s+/g, '').substring(0, 80);
+    let questionLine = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].replace(/\s+/g, '').includes(searchText)) {
+        questionLine = i;
+        break;
+      }
+    }
+
+    if (questionLine < 0) continue;
+
+    // 找到该行所属的章节
+    let matchedSection: SectionInfo | undefined;
+    for (let si = sections.length - 1; si >= 0; si--) {
+      if (questionLine >= sections[si].lineIndex) {
+        matchedSection = sections[si];
+        break;
+      }
+    }
+
+    if (!matchedSection) continue;
+
+    // 寻找该题附近（该题到下一题之间）的标注文本
+    const qIdx = questions.indexOf(q);
+    const nextQLine = qIdx < questions.length - 1
+      ? (() => {
+          const nextText = questions[qIdx + 1].content.replace(/\s+/g, '').substring(0, 80);
+          for (let i = questionLine + 1; i < lines.length; i++) {
+            if (lines[i].replace(/\s+/g, '').includes(nextText)) return i;
+          }
+          return lines.length;
+        })()
+      : lines.length;
+
+    const nearbyAnnotations: string[] = [];
+    for (let li = questionLine; li < nextQLine; li++) {
+      const annotationMatch = lines[li].trim().match(annotationRe);
+      if (annotationMatch) {
+        nearbyAnnotations.push(annotationMatch[1].trim());
+      }
+    }
+
+    const titleParts: string[] = [matchedSection.name];
+    if (nearbyAnnotations.length > 0) {
+      titleParts.push(nearbyAnnotations[0]);
+    }
+
+    q.title = titleParts.join(' | ');
+  }
+
+  const withTitles = questions.filter(q => q.title).length;
+  if (withTitles > 0) {
+    const titles = [...new Set(questions.map(q => q.title).filter(Boolean))];
+    console.log(`  [MinerU v4] 章节标题注入: ${withTitles}/${questions.length} 题, 章节: [${titles.join(', ')}]`);
+  }
+}
+
+/**
+ * 将 MinerU 结构化数据（blocks, formulas）匹配到已拆分的题目中
+ * 填充 ParsedQuestion.formulas 和 ParsedQuestion.sourceBlocks
+ */
+function bridgeStructuredData(
+  questions: ParsedQuestion[],
+  structured: StructuredOcrData,
+): void {
+  for (const q of questions) {
+    // 合并题干+答案+解析，去空格和转小写做模糊匹配
+    const qContent = (q.content + (q.answer || '') + (q.analysis || ''))
+      .replace(/\s+/g, '')
+      .toLowerCase();
+
+    // 匹配公式：检查公式 LaTeX（去空格）是否出现在题目内容中
+    const matchedFormulas = structured.formulas.filter(f =>
+      qContent.includes(f.latex.replace(/\s+/g, '').toLowerCase()),
+    );
+    if (matchedFormulas.length > 0) {
+      q.formulas = JSON.stringify(matchedFormulas);
+    }
+
+    // 匹配源块：按文本内容前缀匹配（去空格，取前 50 字符）
+    const matchedBlocks = structured.blocks.filter(b => {
+      const bText = (b.text || '').trim();
+      if (bText.length < 5) return false;
+      const normalized = bText.replace(/\s+/g, '').toLowerCase().substring(0, 50);
+      return normalized.length > 3 && qContent.includes(normalized);
+    });
+
+    if (matchedBlocks.length > 0) {
+      q.sourceBlocks = JSON.stringify(
+        matchedBlocks.map(({ type, text, bbox, pageIdx, textLevel, imgPath }) => ({
+          type,
+          text: (text || '').substring(0, 300),
+          bbox,
+          pageIdx,
+          textLevel,
+          imgPath,
+        })),
+      );
+    }
+  }
+
+  const withFormulas = questions.filter(q => q.formulas).length;
+  const withBlocks = questions.filter(q => q.sourceBlocks).length;
+  console.log(`  [MinerU v4] 结构化桥接: ${withFormulas}/${questions.length} 题有公式, ${withBlocks}/${questions.length} 题有源块`);
+}
+
+// ============================================================
+// 主入口
+// ============================================================
+
+/**
+ * 使用 MinerU v4 Precision Extract API 处理 PDF
+ *
+ * 双策略:
+ *   1. 先尝试批量上传 + 自动任务（适合本地文件，无需公开URL）
+ *   2. 若无法获取 task_id，回退到单文件 API（需要公开URL，适合部署环境）
  */
 export async function processPDF(
   filePath: string,
-  outputDir: string
+  outputDir: string,
+  options: MinerUOptions = {},
 ): Promise<MinerUResult> {
+  const startTime = Date.now();
+  const fileName = path.basename(filePath);
+
   try {
-    console.log(`\n处理PDF: ${path.basename(filePath)}`);
+    console.log(`\n[MinerU v4] 处理: ${fileName}`);
 
     if (!fs.existsSync(filePath)) {
       return { success: false, error: '文件不存在' };
     }
 
-    const stats = fs.statSync(filePath);
-    const fileName = path.basename(filePath, '.pdf');
+    const safeName = fileName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_.-]/g, '_');
+    const ts = Date.now();
+    const uniqueBase = `${ts}-${path.basename(safeName, '.pdf')}`;
 
-    // 生成唯一时间戳，确保每次识别的中间产物不冲突
-    const timestamp = Date.now();
-    const uniqueFileName = `${timestamp}-${fileName}`;
+    const mergedOpts: MinerUOptions = {
+      model_version: 'vlm',
+      is_ocr: true,
+      enable_formula: true,
+      enable_table: true,
+      language: 'ch',
+      ...options,
+    };
 
-    // 1. 上传文件
-    const serverFilePath = await uploadPDF(filePath);
-    if (!serverFilePath) {
-      return { success: false, error: '上传失败' };
+    // 策略1: 批量上传 → 自动创建任务 → 轮询
+    const uploadInfo = await requestUploadUrl(path.basename(filePath), mergedOpts);
+    if (!uploadInfo) {
+      return { success: false, error: '获取上传URL失败' };
     }
 
-    // 2. 调用预测
-    const predictResult = await predictPDF(serverFilePath, path.basename(filePath), stats.size);
-    if (!predictResult) {
-      return { success: false, error: '识别失败' };
+    const uploaded = await uploadFile(filePath, uploadInfo.signedUrl);
+    if (!uploaded) {
+      return { success: false, error: '文件上传失败' };
     }
 
-    // 3. 提取zip URL
-    const zipUrl = extractZipUrl(predictResult);
-    if (!zipUrl) {
-      return { success: false, error: '无法获取结果URL' };
+    // 等待系统自动创建任务（批量上传不暴露task_id，此路径仅上传文件到OSS）
+    await new Promise(r => setTimeout(r, 3000));
+
+    // 尝试从 OSS URL 构造公开可读 URL
+    // OSS 文件不可公开读取，直接走公开URL方案
+    let taskResult: TaskStatusResponse['data'] | null = null;
+
+    // 尝试公开URL方案：复制到 public/ 或上传到临时托管
+    console.log('  [MinerU v4] 使用公开URL方案提交提取任务...');
+
+    let publicUrl: string | null = null;
+
+    // 先尝试通过临时文件托管服务获取公开URL
+    publicUrl = await uploadToTmpHost(filePath);
+    if (!publicUrl) {
+      // 回退: 复制到 public/ 目录（仅生产环境有效）
+      const publicDir = path.join(process.cwd(), 'public', 'uploads', 'ocr');
+      if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+      const publicFileName = `${uniqueBase}.pdf`;
+      fs.copyFileSync(filePath, path.join(publicDir, publicFileName));
+      publicUrl = `${APP_BASE_URL}/uploads/ocr/${publicFileName}`;
     }
 
-    // 4. 下载结果（使用时间戳确保唯一性）
-    const extractDir = await downloadResult(zipUrl, outputDir, uniqueFileName);
+    console.log(`  [MinerU v4] 公开URL: ${publicUrl}`);
+
+    const urlTaskId = await createTaskViaUrl(publicUrl, mergedOpts);
+    if (!urlTaskId) {
+      return { success: false, error: '创建提取任务失败' };
+    }
+
+    taskResult = await pollTask(urlTaskId, 600000);
+
+    if (!taskResult) {
+      return { success: false, error: '任务处理失败或超时' };
+    }
+
+    if (!taskResult.full_zip_url) {
+      return { success: false, error: taskResult.err_msg || '未返回结果URL' };
+    }
+
+    // 下载并解压
+    const extractDir = await downloadAndExtract(taskResult.full_zip_url, outputDir, uniqueBase);
     if (!extractDir) {
       return { success: false, error: '下载结果失败' };
     }
 
-    // 5. 读取markdown内容
-    const markdownContent = readMarkdownContent(extractDir);
-    if (!markdownContent) {
-      return { success: false, error: '读取结果失败' };
+    // 读取结果
+    const mdContent = readMarkdown(extractDir);
+    if (!mdContent) {
+      return { success: false, error: '读取识别结果失败' };
     }
 
-    // 6. 保存原始markdown内容（带时间戳，避免覆盖）
-    const markdownSavePath = path.join(outputDir, `${uniqueFileName}-raw.md`);
-    fs.writeFileSync(markdownSavePath, markdownContent, 'utf-8');
-    console.log(`  [MinerU] 原始内容已保存: ${markdownSavePath}`);
+    // 保存原始MD
+    const mdPath = path.join(outputDir, `${uniqueBase}-full.md`);
+    fs.writeFileSync(mdPath, mdContent, 'utf-8');
+    console.log(`  [MinerU v4] 原始MD已保存: ${mdPath}`);
 
-    // 7. 读取结构化数据（_content_list.json）
+    // 保存全部输出文件
+    saveAllOutputFiles(extractDir, outputDir, uniqueBase);
+
+    // 结构化数据
     const structuredData = readStructuredData(extractDir);
     if (structuredData) {
-      console.log(`  [MinerU] 结构化数据: ${structuredData.blocks.length} 个 Block, ${structuredData.formulas.length} 个公式`);
+      console.log(`  [MinerU v4] Block: ${structuredData.blocks.length}, 公式: ${structuredData.formulas.length}`);
     }
 
-    // 8. 提取题目（传入结构化数据用于增强分块）
-    const questions = extractQuestionsFromMarkdown(markdownContent, structuredData);
+    // 题目识别
+    const questions = extractQuestions(mdContent, structuredData);
 
-    console.log(`  [MinerU] 识别完成，共 ${questions.length} 道题目`);
+    const elapsed = (Date.now() - startTime) / 1000;
+    const pages = structuredData
+      ? new Set(structuredData.blocks.map(b => b.pageIdx)).size
+      : undefined;
+
+    console.log(`  [MinerU v4] 完成: ${questions.length} 题, ${pages ?? '?'} 页, ${elapsed.toFixed(1)}s`);
 
     return {
       success: true,
-      markdownContent,
+      markdownContent: mdContent,
       questions,
       structuredData: structuredData ?? undefined,
+      elapsed,
+      pages,
+      savedDir: extractDir,
     };
   } catch (error) {
+    const elapsed = (Date.now() - startTime) / 1000;
+    console.error(`[MinerU v4] 失败 (${elapsed.toFixed(1)}s):`, error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : '未知错误',
+      error: error instanceof Error ? error.message : '处理失败',
+      elapsed,
     };
   }
+}
+
+export async function processPDFBatch(
+  filePaths: string[],
+  outputDir: string,
+  options: MinerUOptions = {},
+): Promise<MinerUResult[]> {
+  const results: MinerUResult[] = [];
+  for (const fp of filePaths) {
+    results.push(await processPDF(fp, outputDir, options));
+  }
+  return results;
 }

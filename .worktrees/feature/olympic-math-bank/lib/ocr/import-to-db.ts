@@ -179,30 +179,81 @@ export async function getQuestionTagPaths(questionId: string): Promise<string[]>
   return questionTags.map(qt => getTagPath(qt.knowledgeTag));
 }
 
-export function estimateDifficulty(content: string): number {
+export function estimateDifficulty(content: string, gradeHint?: string): number {
   let difficulty = 2;
 
-  if (content.length > 200) difficulty += 1;
-  if (content.length > 500) difficulty += 1;
+  if (content.length > 300) difficulty += 1;
+  if (content.length > 800) difficulty += 1;
 
-  const hardKeywords = ['证明', '复杂', '综合', '拓展', '挑战', '竞赛'];
-  const easyKeywords = ['基础', '简单', '入门', '练习'];
+  const hardKeywords = ['证明', '综合', '拓展', '挑战', '竞赛', '奥数', '拔高', '压轴'];
+  const easyKeywords = ['基础', '简单', '入门', '练习', '口算'];
+  const mathSignals = [/\b(?:求证|求证于)\b/, /至少.{0,4}种/, /是否存在/, /构造/];
 
+  let hardHits = 0;
   for (const keyword of hardKeywords) {
-    if (content.includes(keyword)) {
-      difficulty += 1;
-      break;
-    }
+    if (content.includes(keyword)) hardHits++;
+  }
+  if (hardHits >= 2) difficulty += 2;
+  else if (hardHits === 1) difficulty += 1;
+
+  for (const signal of mathSignals) {
+    if (signal.test(content)) { difficulty += 1; break; }
   }
 
+  let easyHits = 0;
   for (const keyword of easyKeywords) {
-    if (content.includes(keyword)) {
-      difficulty -= 1;
-      break;
-    }
+    if (content.includes(keyword)) easyHits++;
+  }
+  if (easyHits >= 2) difficulty -= 1;
+
+  if (gradeHint) {
+    const gradeNum = parseInt(gradeHint.replace(/[^0-9]/g, ''));
+    if (gradeNum >= 5) difficulty = Math.max(difficulty, 3);
+    if (gradeNum <= 2) difficulty = Math.min(difficulty, 2);
   }
 
   return Math.max(1, Math.min(5, difficulty));
+}
+
+const GRADE_KEYWORDS: Record<string, string> = {
+  '一年级|1年级|上册|下册': 'P1',
+  '二年级|2年级': 'P2',
+  '三年级|3年级|P3': 'P3',
+  '四年级|4年级|P4': 'P4',
+  '五年级|5年级|P5': 'P5',
+  '六年级|6年级|P6': 'P6',
+};
+
+export function inferGrade(content: string, fileName?: string): string {
+  const searchText = (fileName || '') + ' ' + content;
+
+  for (const [pattern, grade] of Object.entries(GRADE_KEYWORDS)) {
+    for (const kw of pattern.split('|')) {
+      if (searchText.includes(kw)) return grade;
+    }
+  }
+
+  const gradeSignals: Array<{ grade: string; keywords: string[] }> = [
+    { grade: 'P1', keywords: ['认识数字', '10以内', '20以内', '加减法基础'] },
+    { grade: 'P2', keywords: ['乘法口诀', '表内乘法', '简单图形'] },
+    { grade: 'P3', keywords: ['周长', '面积', '小数初步', '多位数'] },
+    { grade: 'P4', keywords: ['小数运算', '四则运算', '角', '平行', '垂直'] },
+    { grade: 'P5', keywords: ['分数', '方程', '倍数', '因数', '质数', '体积'] },
+    { grade: 'P6', keywords: ['百分数', '比和比例', '圆柱', '圆锥', '负数', '奥数'] },
+  ];
+
+  let bestMatch = { grade: 'P3', score: 0 };
+  for (const { grade, keywords } of gradeSignals) {
+    let score = 0;
+    for (const kw of keywords) {
+      if (searchText.includes(kw)) score++;
+    }
+    if (score > bestMatch.score) {
+      bestMatch = { grade, score };
+    }
+  }
+
+  return bestMatch.grade;
 }
 
 export { autoMatchKnowledgeTagsWithLLM };

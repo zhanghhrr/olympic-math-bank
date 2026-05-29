@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { processPDF } from '@/lib/ocr/rapidocr-client';
+import { processPDF } from '@/lib/ocr/mineru-client';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -30,10 +30,7 @@ export async function POST(request: NextRequest) {
     const filePath = path.join(outputDir, `${timestamp}-${safeName}`);
     fs.writeFileSync(filePath, buffer);
 
-    const result = await processPDF(filePath, outputDir, {
-      model: 'mobile',
-      dpi: 200,
-    });
+    const result = await processPDF(filePath, outputDir);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error || 'OCR 识别失败' }, { status: 500 });
@@ -58,6 +55,8 @@ export async function POST(request: NextRequest) {
       success: true,
       questions,
       totalPages: result.pages || 1,
+      elapsed: result.elapsed,
+      savedDir: result.savedDir,
     });
   } catch (error) {
     console.error('[OCR API] 错误:', error);

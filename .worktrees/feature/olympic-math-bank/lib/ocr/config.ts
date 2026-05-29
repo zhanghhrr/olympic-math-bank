@@ -11,17 +11,27 @@ export const OCR_CONFIG = {
     'image/webp',
   ],
 
-  // 最大文件大小 (10MB)
-  maxFileSize: 10 * 1024 * 1024,
+  // 最大文件大小 (200MB，MinerU v4 API 上限)
+  maxFileSize: 200 * 1024 * 1024,
 
   // 默认语言
-  defaultLanguage: 'chi_sim+eng',
+  defaultLanguage: 'ch',
 
-  // 处理超时时间 (60秒)
-  processingTimeout: 60000,
+  // 处理超时时间 (10分钟，MinerU v4 API 异步处理)
+  processingTimeout: 600000,
 
-  // MinerU API配置
-  mineruApiUrl: process.env.MINERU_API_URL || 'http://localhost:8000/api',
+  // MinerU v4 API 配置
+  mineruApiUrl: 'https://mineru.net',
+  mineruApiToken: process.env.MINERU_API_TOKEN || '',
+
+  // MinerU v4 默认参数：VLM 模型 + 强制 OCR + 公式 + 表格
+  mineruDefaults: {
+    model_version: 'vlm' as const,
+    is_ocr: true,
+    enable_formula: true,
+    enable_table: true,
+    language: 'ch',
+  },
 };
 
 // 提示词模板

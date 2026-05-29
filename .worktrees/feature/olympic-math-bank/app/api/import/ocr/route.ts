@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { processPDF } from '@/lib/ocr/rapidocr-client';
+import { processPDF } from '@/lib/ocr/mineru-client';
 import { prisma } from '@/lib/db/prisma';
-import { autoMatchKnowledgeTagsWithLLM } from '@/lib/ocr/tagging';
+import { autoMatchKnowledgeTagsWithLLM, getTagTree } from '@/lib/ocr/tagging';
+import { inferGrade, estimateDifficulty } from '@/lib/ocr/import-to-db';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -32,39 +33,38 @@ export async function POST(request: NextRequest) {
     const filePath = path.join(outputDir, `${timestamp}-${safeName}`);
     fs.writeFileSync(filePath, buffer);
 
-    const result = await processPDF(filePath, outputDir, {
-      model: 'mobile',
-      dpi: 200,
-    });
+    const result = await processPDF(filePath, outputDir);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error || 'OCR 识别失败' }, { status: 500 });
     }
 
-    const grade = 'P3';
     const source = file.name;
+
+    // 预加载标签树缓存，避免每道题重复加载
+    await getTagTree();
 
     const questions = await Promise.all(
       (result.questions || []).map(async (q, idx) => {
-        let matchedTags: Array<{ id: string; name: string; path: string }> = [];
+        const tagIds = await autoMatchKnowledgeTagsWithLLM(q.content, q.title).catch(() => []);
 
-        try {
-          const tagIds = await autoMatchKnowledgeTagsWithLLM(q.content);
-          if (tagIds.length > 0) {
-            const tags = await prisma.knowledgeTag.findMany({
-              where: { id: { in: tagIds } },
-              select: { id: true, name: true, module: true, topic: true, subtopic: true, knowledge: true, skill: true },
-              take: 5,
-            });
-            matchedTags = tags.map(t => ({
-              id: t.id,
-              name: t.name,
-              path: [t.module, t.topic, t.subtopic, t.knowledge, t.skill].filter(Boolean).join(' > '),
-            }));
-          }
-        } catch {
-          // tags unavailable
+        let matchedTags: Array<{ id: string; name: string; path: string }> = [];
+        if (tagIds.length > 0) {
+          const tags = await prisma.knowledgeTag.findMany({
+            where: { id: { in: tagIds } },
+            select: { id: true, name: true, module: true, topic: true, subtopic: true, knowledge: true, skill: true },
+            take: 5,
+          });
+          matchedTags = tags.map(t => ({
+            id: t.id,
+            name: t.name,
+            path: [t.module, t.topic, t.subtopic, t.knowledge, t.skill].filter(Boolean).join(' > '),
+          }));
         }
+
+        const compoundContent = [q.content, q.answer, q.analysis].filter(Boolean).join(' ');
+        const grade = inferGrade(compoundContent, source);
+        const difficulty = estimateDifficulty(compoundContent, grade);
 
         return {
           id: `preview-${timestamp}-${idx}`,
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
           answer: q.answer || '',
           solution: q.analysis || '',
           type: q.type || 'SOLUTION',
-          difficulty: q.difficulty || 3,
+          difficulty,
           status: 'DRAFT',
           grade,
           source,
@@ -80,13 +80,15 @@ export async function POST(request: NextRequest) {
           formulas: q.formulas,
           sourceBlocks: q.sourceBlocks,
         };
-      })
+      }),
     );
 
     return NextResponse.json({
       success: true,
       questions,
       totalPages: result.pages || 1,
+      elapsed: result.elapsed,
+      savedDir: result.savedDir,
     });
   } catch (error) {
     console.error('[Import OCR API] 错误:', error);

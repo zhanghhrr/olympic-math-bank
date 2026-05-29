@@ -795,13 +795,6 @@ export class HybridQuestionIdentifier {
   }
 
   /**
-   * 检测题目类型 - 限定为四类：填空题、选择题、解答题、计算题
-   */
-  detectQuestionType(content: string): '填空题' | '选择题' | '解答题' | '计算题' {
-    return detectQuestionType(content);
-  }
-
-  /**
    * 将中文题型映射为 Prisma 数据库枚举值
    */
   static questionTypeToDB(type: '填空题' | '选择题' | '解答题' | '计算题'): 'FILL_BLANK' | 'CHOICE' | 'SOLUTION' | 'CALCULATION' {
@@ -1173,7 +1166,7 @@ export class HybridQuestionIdentifier {
       }
 
       // 检测题目类型
-      const questionType = this.detectQuestionType(finalContent);
+      const questionType = detectQuestionType(finalContent);
 
       questions.push({
         title,
