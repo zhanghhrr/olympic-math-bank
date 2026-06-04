@@ -75,3 +75,12 @@ next-env.d.ts
 /claude-code.bat
 /simpletex-test-output.md
 /verify_general_lecture.py
+
+# Build output
+/dist/
+
+# Python cache
+__pycache__/
+
+# Git temp files
+.git-index-temp

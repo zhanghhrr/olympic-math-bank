@@ -14,8 +14,8 @@ instances.json
 local_storage/
 memory/
 nul
-package.json
-package-lock.json
+/package.json
+/package-lock.json
 plans/
 plugins/
 projects/
