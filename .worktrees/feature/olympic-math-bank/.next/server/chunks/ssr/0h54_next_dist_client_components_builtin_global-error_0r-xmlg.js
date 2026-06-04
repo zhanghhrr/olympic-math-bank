@@ -1,3 +1,0 @@
-module.exports=[97716,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(99423);a.n(d("[project]/.codebuddy/.worktrees/feature/olympic-math-bank/my-app/node_modules/next/dist/client/components/builtin/global-error.js <module evaluation>"))},38619,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(99423);a.n(d("[project]/.codebuddy/.worktrees/feature/olympic-math-bank/my-app/node_modules/next/dist/client/components/builtin/global-error.js"))},66782,a=>{"use strict";a.i(97716);var b=a.i(38619);a.n(b)},26673,a=>{a.n(a.i(66782))}];
-
-//# sourceMappingURL=0h54_next_dist_client_components_builtin_global-error_0r-xmlg.js.map

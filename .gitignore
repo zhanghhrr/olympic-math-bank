@@ -1,0 +1,12 @@
+.worktrees/
+node_modules/
+.env.local
+uploads/
+*.log
+
+shell-snapshots/
+usage-data/
+blobs/
+file-history/
+logs/
+input_pdfs/
