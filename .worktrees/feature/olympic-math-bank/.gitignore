@@ -56,26 +56,6 @@ next-env.d.ts
 # Logs
 *.log
 
-# Static demo prototypes (not part of Next.js app)
-/static-demo/
-
-# One-off migration/utility scripts
-/migrate-data.mjs
-/check-data.mjs
-/check-db.mjs
-/add-user.mjs
-
-# Temp test files at root
-/test-*.ts
-/test-*.js
-/test-*.mjs
-
-# Misc root artifacts
-/ai-project-charter-workflow.zip
-/claude-code.bat
-/simpletex-test-output.md
-/verify_general_lecture.py
-
 # Build output
 /dist/
 

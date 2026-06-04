@@ -1,39 +1,23 @@
 # ============================================
 # 奥林匹克数学题库管理系统 - 生产环境 Dockerfile
-# 支持 Node.js (Next.js) + Python (OCR)
+# 纯 Node.js 运行环境，OCR 通过 MinerU API 远程调用
 # ============================================
 
-FROM python:3.11-slim AS base
+FROM node:20-slim AS base
 
-# 安装 Node.js 20 LTS
+# 安装 unzip（MinerU API 返回 ZIP 需要解压）
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 OCR 系统依赖（可选：Tesseract 备用引擎）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-chi-sim \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
+    unzip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# ---- Python 依赖层（利用缓存）----
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ---- Node.js 依赖层（利用缓存）----
+# ---- 依赖层（利用 Docker 缓存）----
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# ---- 源码 & 构建层 ----
+# ---- 源码 & 构建 ----
 COPY . .
 
 # 生成 Prisma Client

@@ -1,7 +1,6 @@
 /**
  * 混合题目识别器
- * 将 verify_general_lecture.py 中的 HybridQuestionIdentifier 转换为 TypeScript
- * 用于智能识别和分割题目内容
+ * 智能识别和分割 OCR 输出的题目内容，区分单题/列表/忽略块
  */
 
 export interface IdentifiedBlock {
