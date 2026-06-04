@@ -2,10 +2,18 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// 数据库数据源配置
+//   - 本地开发(SQLite): provider = "sqlite",   DATABASE_URL="file:./dev.db"
+//   - 生产部署(PostgreSQL): provider = "postgresql", DATABASE_URL="postgresql://..."
+// 部署到云服务器时，取消下方注释并注释 SQLite 配置：
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
+// datasource db {
+//   provider = "postgresql"
+//   url      = env("DATABASE_URL")
+// }
 
 // 用户角色
 enum UserRole {

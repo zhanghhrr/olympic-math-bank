@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.next/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env*
+!.env.example
+
+# IDE
+.trae/
+
+# Test output
+test-output/
+uploads/
+
+# Logs
+*.log
+
+# Git
+.git/
+.gitignore
+.git-index-temp
+
+# Docs
+docs/
+static-demo/
+
+# DB files (use PostgreSQL in production)
+*.db
+*.db-journal
+*.db.backup
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Misc
+README.md
+AI_PROJECT_CHARTER_WORKFLOW.zip
+CLAUDE.md

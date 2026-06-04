@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # PostgreSQL 数据库
   postgres:
     image: postgres:15-alpine
     container_name: olympic-math-db
@@ -17,7 +18,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
+  # Redis 缓存（可选，预留）
   redis:
     image: redis:7-alpine
     container_name: olympic-math-redis
@@ -30,7 +33,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
+  # MinIO 对象存储（可选，用于文件存储）
   minio:
     image: minio/minio:latest
     container_name: olympic-math-minio
@@ -43,8 +48,40 @@ services:
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+  # Next.js 应用
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: olympic-math-app
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/olympic_math
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me-in-production}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MINERU_API_URL=${MINERU_API_URL:-}
+      - MINERU_API_KEY=${MINERU_API_KEY:-}
+    volumes:
+      # 持久化上传目录
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    # 生产环境建议添加：
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 2G
+    #     reservations:
+    #       memory: 512M
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  uploads_data:
