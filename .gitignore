@@ -4,6 +4,28 @@ node_modules/
 uploads/
 *.log
 
+# IDE 编辑器内部状态
+cookies.txt
+history.jsonl
+instances.json
+local_storage/
+memory/
+nul
+package.json
+package-lock.json
+plans/
+plugins/
+projects/
+server.pid
+sessions/
+settings.json
+skills/
+studio.pid
+superpowers/
+tasks/
+traces/
+user-state.json
+
 shell-snapshots/
 usage-data/
 blobs/
