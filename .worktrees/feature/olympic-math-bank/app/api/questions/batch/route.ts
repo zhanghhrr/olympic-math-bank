@@ -26,7 +26,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: '缺少更新数据' }, { status: 400 });
     }
 
-    const { content, answer, solution, type, difficulty, status, knowledgeTagIds } = data;
+    const { content, answer, solution, type, difficulty, grade, status, knowledgeTagIds } = data;
 
     // 构建更新数据
     const updateData: any = {};
@@ -35,6 +35,7 @@ export async function PATCH(request: NextRequest) {
     if (solution !== undefined) updateData.solution = solution;
     if (type !== undefined) updateData.type = type;
     if (difficulty !== undefined) updateData.difficulty = difficulty;
+    if (grade !== undefined) updateData.grade = grade;
     if (status !== undefined) updateData.status = status;
 
     // 执行批量更新

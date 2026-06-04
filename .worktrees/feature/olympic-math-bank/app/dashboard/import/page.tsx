@@ -16,10 +16,13 @@ interface QuestionPreview {
   status: string;
   grade: string;
   source: string;
+  pages?: number[];
   matchedTags: Array<{
     id: string;
     name: string;
     path: string;
+    score?: number;
+    matchSource?: string;
   }>;
 }
 
@@ -55,6 +58,8 @@ export default function ImportPage() {
   const [result, setResult] = useState<ImportPreviewResult | null>(null);
   const [autoMatchTags, setAutoMatchTags] = useState(true);
   const [selectedGrade, setSelectedGrade] = useState('P3');
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [asyncMode, setAsyncMode] = useState(true);
 
   // 预览模式状态
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -68,6 +73,7 @@ export default function ImportPage() {
       setResult(null);
       setQuestions([]);
       setSelectedIds(new Set());
+      setPdfUrl(null);
     }
   };
 
@@ -84,6 +90,64 @@ export default function ImportPage() {
 
     if (activeTab === 'pdf') {
       setCurrentStage('uploading');
+
+      if (asyncMode) {
+        // 异步模式：立即返回 jobId，后台处理
+        const formData = new FormData();
+        formData.append('file', files[0]);
+
+        try {
+          const res = await fetch('/api/import/ocr/async', {
+            method: 'POST',
+            body: formData,
+          });
+          const data = await res.json();
+          if (res.ok && data.jobId) {
+            setPdfUrl(data.pdfUrl || null);
+            // 开始轮询任务状态
+            const pollInterval = setInterval(async () => {
+              try {
+                const statusRes = await fetch(`/api/import/ocr/async?jobId=${data.jobId}`);
+                const statusData = await statusRes.json();
+                if (statusData.status === 'COMPLETED') {
+                  clearInterval(pollInterval);
+                  setCurrentStage('preview');
+                  setQuestions(statusData.questions || []);
+                  setResult({
+                    success: true,
+                    message: 'OCR 识别完成',
+                    questions: statusData.questions || [],
+                  });
+                  setStageProgress(100);
+                } else if (statusData.status === 'FAILED') {
+                  clearInterval(pollInterval);
+                  setCurrentStage('error');
+                  setResult({
+                    success: false,
+                    message: statusData.errorMessage || 'OCR 识别失败',
+                    questions: [],
+                  });
+                } else {
+                  setStageProgress(prev => Math.min(prev + 5, 90));
+                }
+              } catch {
+                clearInterval(pollInterval);
+                setCurrentStage('error');
+                setResult({ success: false, message: '查询任务状态失败', questions: [] });
+              }
+            }, 3000);
+            setStageProgress(20);
+          } else {
+            setCurrentStage('error');
+            setResult({ success: false, message: data.error || '创建异步任务失败', questions: [] });
+          }
+        } catch (error) {
+          setCurrentStage('error');
+          setResult({ success: false, message: '网络错误，请重试', questions: [] });
+        }
+        setUploading(false);
+        return;
+      }
 
       formData.append('file', files[0]);
       formData.append('autoMatchTags', autoMatchTags.toString());
@@ -111,6 +175,7 @@ export default function ImportPage() {
         if (res.ok) {
           setCurrentStage('preview');
           setQuestions(data.questions || []);
+          setPdfUrl(data.pdfUrl || null);
           setResult({
             success: true,
             message: data.message,
@@ -387,6 +452,19 @@ export default function ImportPage() {
               根据题目内容自动匹配知识标签（推荐开启）
             </span>
           </label>
+
+          {/* 异步模式切换 */}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={asyncMode}
+              onChange={(e) => setAsyncMode(e.target.checked)}
+              className="w-4 h-4 rounded text-primary"
+            />
+            <span className="text-sm text-foreground">
+              后台异步处理（适合大文件，不阻塞操作）
+            </span>
+          </label>
         </div>
       )}
 
@@ -555,31 +633,49 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* 题目预览列表 */}
+        {/* 题目预览列表 - 分栏布局 */}
         {currentStage === 'preview' && questions.length > 0 && (
-          <div className="mt-6 space-y-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-medium text-foreground">题目预览（共 {questions.length} 道）</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleBackToPreview}
-                className="border-border hover:bg-muted rounded-xl"
-              >
-                重新上传
-              </Button>
-            </div>
-            <div className="space-y-3 max-h-[600px] overflow-y-auto">
-              {questions.map((question, idx) => (
-                <QuestionCard
-                  key={question.id}
-                  question={question}
-                  isSelected={selectedIds.has(question.id)}
-                  onSelect={handleSelect}
-                  onUpdate={handleUpdateQuestion}
-                  onRemoveTag={handleRemoveTag}
+          <div className="mt-6 flex gap-4" style={{ minHeight: '600px' }}>
+            {/* 左侧：PDF 预览 */}
+            {pdfUrl && (
+              <div className="w-[45%] shrink-0 border border-border rounded-xl overflow-hidden bg-muted/10">
+                <div className="bg-muted/30 px-4 py-2 border-b border-border flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-foreground">PDF 原文预览</h3>
+                </div>
+                <iframe
+                  src={pdfUrl}
+                  className="w-full"
+                  style={{ height: '600px' }}
+                  title="PDF预览"
                 />
-              ))}
+              </div>
+            )}
+
+            {/* 右侧：题目列表 */}
+            <div className={`${pdfUrl ? 'flex-1' : 'w-full'} space-y-3`}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-medium text-foreground">题目预览（共 {questions.length} 道）</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBackToPreview}
+                  className="border-border hover:bg-muted rounded-xl"
+                >
+                  重新上传
+                </Button>
+              </div>
+              <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                {questions.map((question, idx) => (
+                  <QuestionCard
+                    key={question.id}
+                    question={question}
+                    isSelected={selectedIds.has(question.id)}
+                    onSelect={handleSelect}
+                    onUpdate={handleUpdateQuestion}
+                    onRemoveTag={handleRemoveTag}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         )}

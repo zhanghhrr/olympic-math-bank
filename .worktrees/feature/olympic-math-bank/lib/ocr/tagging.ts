@@ -253,10 +253,42 @@ function scoredToTagIds(topMatches: TagMatchResult[]): string[] {
   return resultIds;
 }
 
+export interface ScoredTag {
+  tagId: string;
+  tagName: string;
+  score: number;
+  path: string;
+  level: number;
+  matchSource: 'section_title' | 'annotation' | 'keyword' | 'llm';
+}
+
+function classifyMatchSource(tagName: string, title?: string): ScoredTag['matchSource'] {
+  if (!title) return 'keyword';
+  const parts = title.split(' | ');
+  const sectionName = parts[0]?.trim();
+  const annotationHint = parts[1]?.trim();
+
+  if (sectionName && sectionTitleToTagNames[sectionName]) {
+    if (sectionTitleToTagNames[sectionName].includes(tagName)) return 'section_title';
+  }
+  if (annotationHint) {
+    if (annotationToTagNames[annotationHint]?.includes(tagName)) return 'annotation';
+  }
+  return 'keyword';
+}
+
 export async function autoMatchKnowledgeTagsWithLLM(
   content: string,
   title?: string
 ): Promise<string[]> {
+  const result = await autoMatchKnowledgeTagsWithScores(content, title);
+  return result.tagIds;
+}
+
+export async function autoMatchKnowledgeTagsWithScores(
+  content: string,
+  title?: string
+): Promise<{ tagIds: string[]; scoredTags: ScoredTag[] }> {
   const allTags = await getTagTree();
   const searchText = (title ? title + ' ' : '') + content;
   const matchedScores: TagMatchResult[] = [];
@@ -276,7 +308,7 @@ export async function autoMatchKnowledgeTagsWithLLM(
   }
 
   if (matchedScores.length === 0) {
-    return [];
+    return { tagIds: [], scoredTags: [] };
   }
 
   const sortedByScore = [...matchedScores].sort((a, b) => b.score - a.score);
@@ -299,44 +331,47 @@ export async function autoMatchKnowledgeTagsWithLLM(
     || (!hasEnoughStable && minLeafScore < LLM_FALLBACK_THRESHOLD);
 
   if (!needsLLM || !isLLMAvailable()) {
-    return scoredToTagIds(topMatches);
+    const tagIds = scoredToTagIds(topMatches);
+    const scoredTags: ScoredTag[] = topMatches.map(m => ({
+      tagId: m.tagId,
+      tagName: m.tagName,
+      score: m.score,
+      path: m.path,
+      level: m.level,
+      matchSource: classifyMatchSource(m.tagName, title),
+    }));
+    return { tagIds, scoredTags };
   }
 
+  const llmAddedTagNames = new Set<string>();
   try {
     const topCandidates = sortedByScore.slice(0, 20);
-
     const llmResults = await matchTagsViaLLM(
       searchText,
-      topCandidates.map((m) => ({
-        name: m.tagName,
-        path: m.path,
-        level: m.level,
-      }))
+      topCandidates.map((m) => ({ name: m.tagName, path: m.path, level: m.level }))
     );
-
-    if (llmResults.length === 0) {
-      return scoredToTagIds(topMatches);
-    }
-
-    const staticTagNames = new Set(topMatches.map(m => m.tagName));
-
-    for (const result of llmResults) {
-      if (staticTagNames.has(result.tagName)) continue;
-      const tag = allTags.find(t => t.name === result.tagName);
-      if (!tag) continue;
-      staticTagNames.add(result.tagName);
-      topMatches.push({
-        tagId: tag.id,
-        tagName: tag.name,
-        score: result.confidence,
-        level: tag.level,
-        tag,
-        path: getTagFullPath(tag),
-      });
+    if (llmResults.length > 0) {
+      const staticTagNames = new Set(topMatches.map(m => m.tagName));
+      for (const result of llmResults) {
+        if (staticTagNames.has(result.tagName)) continue;
+        const tag = allTags.find(t => t.name === result.tagName);
+        if (!tag) continue;
+        staticTagNames.add(result.tagName);
+        llmAddedTagNames.add(result.tagName);
+        topMatches.push({
+          tagId: tag.id, tagName: tag.name, score: result.confidence,
+          level: tag.level, tag, path: getTagFullPath(tag),
+        });
+      }
     }
   } catch (err) {
     console.warn('[Tagging] LLM 兜底失败，回退到静态匹配:', (err as Error).message);
   }
 
-  return scoredToTagIds(topMatches);
+  const tagIds = scoredToTagIds(topMatches);
+  const scoredTags: ScoredTag[] = topMatches.map(m => ({
+    tagId: m.tagId, tagName: m.tagName, score: m.score, path: m.path, level: m.level,
+    matchSource: llmAddedTagNames.has(m.tagName) ? 'llm' : classifyMatchSource(m.tagName, title),
+  }));
+  return { tagIds, scoredTags };
 }

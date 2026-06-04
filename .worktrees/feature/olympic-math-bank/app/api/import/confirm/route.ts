@@ -11,6 +11,7 @@ import { QuestionStatus, Grade } from '@prisma/client';
 import { autoMatchKnowledgeTagsWithLLM, detectQuestionType, estimateDifficulty, stripQuestionNumber } from '@/lib/ocr/import-to-db';
 import { HybridQuestionIdentifier } from '@/lib/ocr/question-identifier';
 import { verifyFormulasFromJson, serializeVerifiedFormulas } from '@/lib/ocr/formula-verifier';
+import { batchCheckDuplicates } from '@/lib/ocr/dedup';
 
 interface QuestionPreview {
   tempId?: string;
@@ -105,6 +106,15 @@ export async function POST(request: NextRequest) {
         };
       }),
     );
+
+    // 去重检查：检测重复题目，标记但不阻止导入
+    const dedupResults = await batchCheckDuplicates(
+      preparedQuestions.map(pq => pq.content)
+    );
+    const dupCount = dedupResults.filter(r => r.isDuplicate).length;
+    if (dupCount > 0) {
+      console.log(`[Confirm Import] 发现 ${dupCount} 道可能重复的题目`);
+    }
 
     // 批量创建题目（单事务）
     const createdQuestions = await prisma.$transaction(

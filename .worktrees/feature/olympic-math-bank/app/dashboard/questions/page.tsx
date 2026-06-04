@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous, ShoppingCart } from 'lucide-react';
+import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous, ShoppingCart, Settings, Download, Tag } from 'lucide-react';
 import { QuestionContent } from '@/components/QuestionContent';
+import { BatchTagDialog } from '@/components/knowledge-tag/batch-dialog';
 
 interface KnowledgeTagTreeNode {
   id: string;
@@ -412,6 +413,11 @@ export default function QuestionsPage() {
 
   // 购物车选中的题目 IDs
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
+  const [showBatchEdit, setShowBatchEdit] = useState(false);
+  const [batchGrade, setBatchGrade] = useState('');
+  const [batchDifficulty, setBatchDifficulty] = useState('');
+  const [showBatchTagDialog, setShowBatchTagDialog] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState(false);
 
   useEffect(() => {
     fetchTagTree();
@@ -564,6 +570,78 @@ export default function QuestionsPage() {
       }
       return next;
     });
+  };
+
+  const handleBatchUpdate = async () => {
+    const ids = Array.from(selectedQuestionIds);
+    const data: Record<string, unknown> = {};
+    if (batchGrade) data.grade = batchGrade;
+    if (batchDifficulty) data.difficulty = parseInt(batchDifficulty);
+    if (Object.keys(data).length === 0) return;
+    setBatchUpdating(true);
+    try {
+      const res = await fetch('/api/questions/batch', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, data }),
+      });
+      const result = await res.json();
+      if (result.success > 0) {
+        setBatchGrade('');
+        setBatchDifficulty('');
+        setShowBatchEdit(false);
+        fetchQuestions();
+      }
+    } catch (error) {
+      console.error('批量更新失败:', error);
+    } finally {
+      setBatchUpdating(false);
+    }
+  };
+
+  const handleBatchTagConfirm = async (tagIds: string[]) => {
+    const ids = Array.from(selectedQuestionIds);
+    setBatchUpdating(true);
+    try {
+      const res = await fetch('/api/questions/batch', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, data: { knowledgeTagIds: tagIds } }),
+      });
+      const result = await res.json();
+      if (result.success > 0) {
+        setShowBatchTagDialog(false);
+        fetchQuestions();
+      }
+    } catch (error) {
+      console.error('批量打标签失败:', error);
+    } finally {
+      setBatchUpdating(false);
+    }
+  };
+
+  const handleExport = async (format: 'json' | 'csv' | 'md') => {
+    const ids = Array.from(selectedQuestionIds);
+    try {
+      const res = await fetch(`/api/export/${format}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionIds: ids }),
+      });
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename\*=UTF-8''(.+)/);
+      a.download = match ? decodeURIComponent(match[1]) : `export.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(`导出 ${format.toUpperCase()} 失败:`, error);
+    }
   };
 
   if (loading) {
@@ -901,6 +979,36 @@ export default function QuestionsPage() {
             >
               清空
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowBatchEdit(!showBatchEdit)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Settings className="w-4 h-4 mr-1" />
+              批量编辑
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowBatchTagDialog(true)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Tag className="w-4 h-4 mr-1" />
+              批量打标签
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => handleExport('json')} className="text-muted-foreground hover:text-foreground">
+              <Download className="w-4 h-4 mr-1" />
+              JSON
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => handleExport('csv')} className="text-muted-foreground hover:text-foreground">
+              <Download className="w-4 h-4 mr-1" />
+              CSV
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => handleExport('md')} className="text-muted-foreground hover:text-foreground">
+              <Download className="w-4 h-4 mr-1" />
+              MD
+            </Button>
             <Button 
               size="sm" 
               className="bg-primary hover:bg-primary-hover text-primary-foreground shadow-md px-6"
@@ -914,6 +1022,67 @@ export default function QuestionsPage() {
           </div>
         </div>
       )}
+
+      {/* 批量编辑面板 */}
+      {showBatchEdit && selectedQuestionIds.size > 0 && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-surface border border-border shadow-xl rounded-2xl px-6 py-4 z-50 animate-in slide-in-from-bottom-5">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted-foreground whitespace-nowrap">年级:</label>
+              <select
+                value={batchGrade}
+                onChange={(e) => setBatchGrade(e.target.value)}
+                className="select-field text-sm h-9"
+              >
+                <option value="">不变</option>
+                <option value="P1">一年级</option>
+                <option value="P2">二年级</option>
+                <option value="P3">三年级</option>
+                <option value="P4">四年级</option>
+                <option value="P5">五年级</option>
+                <option value="P6">六年级</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted-foreground whitespace-nowrap">难度:</label>
+              <select
+                value={batchDifficulty}
+                onChange={(e) => setBatchDifficulty(e.target.value)}
+                className="select-field text-sm h-9"
+              >
+                <option value="">不变</option>
+                <option value="1">★</option>
+                <option value="2">★★</option>
+                <option value="3">★★★</option>
+                <option value="4">★★★★</option>
+                <option value="5">★★★★★</option>
+              </select>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleBatchUpdate}
+              disabled={batchUpdating || (!batchGrade && !batchDifficulty)}
+              className="bg-primary hover:bg-primary-hover text-primary-foreground"
+            >
+              {batchUpdating ? '更新中...' : '应用'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowBatchEdit(false)}
+              className="text-muted-foreground"
+            >
+              取消
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <BatchTagDialog
+        isOpen={showBatchTagDialog}
+        onClose={() => setShowBatchTagDialog(false)}
+        onConfirm={handleBatchTagConfirm}
+      />
     </div>
   );
 }

@@ -20,6 +20,7 @@
  * 强制启用 VLM 模型 + OCR，确保最高识别精度。
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
@@ -656,11 +657,65 @@ function bridgeStructuredData(
 }
 
 // ============================================================
+// OCR 结果缓存
+// ============================================================
+
+const OCR_CACHE_DIR = path.join(process.cwd(), 'uploads', 'ocr', '.cache');
+
+function getCacheDir(): string {
+  if (!fs.existsSync(OCR_CACHE_DIR)) {
+    fs.mkdirSync(OCR_CACHE_DIR, { recursive: true });
+  }
+  return OCR_CACHE_DIR;
+}
+
+function computeFileHash(filePath: string): string {
+  const buffer = fs.readFileSync(filePath);
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+interface CachedOcrData {
+  mdContent: string;
+  contentList: ContentBlock[];
+}
+
+function readCache(hash: string): CachedOcrData | null {
+  try {
+    const metaPath = path.join(getCacheDir(), `${hash}.json`);
+    const mdPath = path.join(getCacheDir(), `${hash}.md`);
+    if (!fs.existsSync(metaPath) || !fs.existsSync(mdPath)) return null;
+
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    const mdContent = fs.readFileSync(mdPath, 'utf-8');
+    const contentList = meta.contentList as ContentBlock[];
+
+    if (!mdContent || !Array.isArray(contentList)) return null;
+
+    return { mdContent, contentList };
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(hash: string, mdContent: string, contentList: ContentBlock[]): void {
+  try {
+    const metaPath = path.join(getCacheDir(), `${hash}.json`);
+    const mdPath = path.join(getCacheDir(), `${hash}.md`);
+    fs.writeFileSync(mdPath, mdContent, 'utf-8');
+    fs.writeFileSync(metaPath, JSON.stringify({ contentList }), 'utf-8');
+  } catch (error) {
+    console.warn('  [MinerU v4] 写入缓存失败:', error instanceof Error ? error.message : '未知');
+  }
+}
+
+// ============================================================
 // 主入口
 // ============================================================
 
 /**
  * 使用 MinerU v4 Precision Extract API 处理 PDF
+ *
+ * 缓存：以 PDF SHA256 为 key，命中则跳过 API 调用直接复用已保存的 MD + _content_list
  *
  * 双策略:
  *   1. 先尝试批量上传 + 自动任务（适合本地文件，无需公开URL）
@@ -680,6 +735,37 @@ export async function processPDF(
     if (!fs.existsSync(filePath)) {
       return { success: false, error: '文件不存在' };
     }
+
+    const fileHash = computeFileHash(filePath);
+
+    // 检查缓存
+    const cached = readCache(fileHash);
+    if (cached) {
+      console.log(`  [MinerU v4] ✓ 缓存命中 (SHA256: ${fileHash.substring(0, 12)}...)`);
+
+      const structuredData: StructuredOcrData = {
+        blocks: cached.contentList,
+        formulas: extractFormulasFromBlocks(cached.contentList),
+      };
+
+      const questions = extractQuestions(cached.mdContent, structuredData);
+
+      const elapsed = (Date.now() - startTime) / 1000;
+      const pages = new Set(structuredData.blocks.map(b => b.pageIdx)).size;
+
+      console.log(`  [MinerU v4] 完成(缓存): ${questions.length} 题, ${pages} 页, ${elapsed.toFixed(1)}s`);
+
+      return {
+        success: true,
+        markdownContent: cached.mdContent,
+        questions,
+        structuredData,
+        elapsed,
+        pages,
+      };
+    }
+
+    console.log(`  [MinerU v4] 缓存未命中，调用 API (SHA256: ${fileHash.substring(0, 12)}...)`);
 
     const safeName = fileName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_.-]/g, '_');
     const ts = Date.now();
@@ -769,6 +855,11 @@ export async function processPDF(
     const structuredData = readStructuredData(extractDir);
     if (structuredData) {
       console.log(`  [MinerU v4] Block: ${structuredData.blocks.length}, 公式: ${structuredData.formulas.length}`);
+    }
+
+    // 写入 OCR 结果缓存
+    if (structuredData) {
+      writeCache(fileHash, mdContent, structuredData.blocks);
     }
 
     // 题目识别

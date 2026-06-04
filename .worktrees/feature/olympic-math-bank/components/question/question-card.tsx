@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronUp, Edit2, Save, X, Tag } from 'lucide-react';
+import { ChevronDown, ChevronUp, Edit2, Save, X } from 'lucide-react';
 import { QuestionContent } from '@/components/QuestionContent';
 
 interface QuestionPreview {
@@ -17,7 +17,10 @@ interface QuestionPreview {
     id: string;
     name: string;
     path: string;
+    score?: number;
+    matchSource?: string;
   }>;
+  pages?: number[];
 }
 
 interface QuestionCardProps {
@@ -26,6 +29,26 @@ interface QuestionCardProps {
   onSelect: (id: string, selected: boolean) => void;
   onUpdate: (id: string, data: Partial<QuestionPreview>) => void;
   onRemoveTag: (questionId: string, tagId: string) => void;
+}
+
+function getConfidenceLevel(score: number) {
+  if (score >= 5) {
+    return { label: '高', dot: 'bg-green-500', bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200' };
+  }
+  if (score >= 3) {
+    return { label: '中', dot: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' };
+  }
+  return { label: '低', dot: 'bg-red-400', bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' };
+}
+
+function getMatchSourceLabel(source?: string) {
+  const labels: Record<string, string> = {
+    section_title: '章节标题',
+    annotation: '标注文本',
+    keyword: '关键词匹配',
+    llm: 'AI推断',
+  };
+  return labels[source || ''] || '未知';
 }
 
 export function QuestionCard({
@@ -98,6 +121,11 @@ export function QuestionCard({
             <span className="badge badge-pending">
               {question.status === 'DRAFT' ? '草稿' : question.status}
             </span>
+            {question.pages && question.pages.length > 0 && (
+              <span className="badge bg-muted text-muted-foreground" title={`题目位于第 ${question.pages.join(', ')} 页`}>
+                第{question.pages.join(',')}页
+              </span>
+            )}
           </div>
 
           {/* Question Content Preview */}
@@ -118,24 +146,27 @@ export function QuestionCard({
           {/* Tags */}
           {question.matchedTags.length > 0 && (
             <div className="flex flex-wrap gap-1 mb-2">
-              {question.matchedTags.map((tag) => (
-                <span
-                  key={tag.id}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs"
-                  title={tag.path}
-                >
-                  <Tag className="w-3 h-3" />
-                  {tag.name}
-                  {isEditing && (
-                    <button
-                      onClick={() => onRemoveTag(question.id, tag.id)}
-                      className="ml-1 hover:text-error"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </span>
-              ))}
+              {question.matchedTags.map((tag) => {
+                const confidence = getConfidenceLevel(tag.score ?? 0);
+                return (
+                  <span
+                    key={tag.id}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${confidence.bg} ${confidence.text} ${confidence.border}`}
+                    title={`${tag.path} | 置信度: ${confidence.label} (${tag.score ?? 0}分) | 来源: ${getMatchSourceLabel(tag.matchSource)}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${confidence.dot}`} />
+                    {tag.name}
+                    {isEditing && (
+                      <button
+                        onClick={() => onRemoveTag(question.id, tag.id)}
+                        className="ml-1 hover:text-error"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
             </div>
           )}
 
