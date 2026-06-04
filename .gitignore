@@ -1,4 +1,7 @@
-.worktrees/
+.worktrees/*
+!.worktrees/feature/
+.worktrees/feature/*
+!.worktrees/feature/olympic-math-bank/
 node_modules/
 .env.local
 uploads/
