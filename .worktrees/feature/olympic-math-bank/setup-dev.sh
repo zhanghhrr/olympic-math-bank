@@ -48,7 +48,12 @@ echo ""
 echo "🗄️  生成 Prisma Client..."
 npx prisma generate
 
-# 6. 完成
+# 6. 执行数据库迁移（确保 Schema 与数据库结构一致）
+echo ""
+echo "🔄 执行数据库迁移..."
+npm run db:migrate
+
+# 7. 完成
 echo ""
 echo "=========================================="
 echo "✅ 设置完成！"

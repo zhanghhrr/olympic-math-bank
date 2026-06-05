@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, FileImage, FileText, Loader2, CheckCircle, AlertCircle, Tag, FileCheck, Brain } from 'lucide-react';
+import { Upload, FileImage, FileText, Loader2, CheckCircle, AlertCircle, Tag, FileCheck, Brain, XCircle } from 'lucide-react';
 import { QuestionCard } from '@/components/question/question-card';
 import { BatchTagDialog } from '@/components/knowledge-tag/batch-dialog';
 
@@ -66,6 +66,20 @@ export default function ImportPage() {
   const [questions, setQuestions] = useState<QuestionPreview[]>([]);
   const [showBatchTagDialog, setShowBatchTagDialog] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [undoTimer, setUndoTimer] = useState<number>(0);
+  const [undoJobItems, setUndoJobItems] = useState<string[]>([]);
+
+  // 撤销倒计时
+  useEffect(() => {
+    if (undoTimer <= 0) {
+      if (undoTimer === 0 && undoJobItems.length > 0) {
+        setUndoJobItems([]);
+      }
+      return;
+    }
+    const timer = setTimeout(() => setUndoTimer(prev => prev - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [undoTimer, undoJobItems.length]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -93,7 +107,6 @@ export default function ImportPage() {
 
       if (asyncMode) {
         // 异步模式：立即返回 jobId，后台处理
-        const formData = new FormData();
         formData.append('file', files[0]);
 
         try {
@@ -104,13 +117,22 @@ export default function ImportPage() {
           const data = await res.json();
           if (res.ok && data.jobId) {
             setPdfUrl(data.pdfUrl || null);
-            // 开始轮询任务状态
+            // 轮询任务状态：最多100次（5分钟），连续3次失败才终止
+            let pollCount = 0;
+            let consecutiveFailures = 0;
+            const MAX_POLLS = 100;
+            const MAX_CONSECUTIVE_FAILURES = 3;
+
             const pollInterval = setInterval(async () => {
               try {
+                pollCount++;
                 const statusRes = await fetch(`/api/import/ocr/async?jobId=${data.jobId}`);
                 const statusData = await statusRes.json();
+                consecutiveFailures = 0; // 成功后重置连续失败计数
+
                 if (statusData.status === 'COMPLETED') {
                   clearInterval(pollInterval);
+                  setUploading(false);
                   setCurrentStage('preview');
                   setQuestions(statusData.questions || []);
                   setResult({
@@ -121,6 +143,7 @@ export default function ImportPage() {
                   setStageProgress(100);
                 } else if (statusData.status === 'FAILED') {
                   clearInterval(pollInterval);
+                  setUploading(false);
                   setCurrentStage('error');
                   setResult({
                     success: false,
@@ -128,24 +151,55 @@ export default function ImportPage() {
                     questions: [],
                   });
                 } else {
-                  setStageProgress(prev => Math.min(prev + 5, 90));
+                  // 超过最大轮询次数
+                  if (pollCount >= MAX_POLLS) {
+                    clearInterval(pollInterval);
+                    setUploading(false);
+                    setCurrentStage('error');
+                    setResult({ success: false, message: '处理超时，请稍后重试', questions: [] });
+                    return;
+                  }
+                  // 根据后端实际数据更新阶段和进度
+                  const total = statusData.totalItems || 0;
+                  const processed = statusData.processedItems || 0;
+                  if (total > 0) {
+                    // OCR 已完成，正在标签匹配
+                    setCurrentStage('tagging');
+                    if (processed >= total) {
+                      setStageProgress(95);
+                    } else {
+                      // 标签匹配占 60%~95%
+                      setStageProgress(60 + Math.round((processed / total) * 35));
+                    }
+                  } else {
+                    // OCR 识别进行中
+                    setCurrentStage('ocr');
+                    // OCR 阶段显示缓慢递增（无精确进度可参考）
+                    setStageProgress(prev => Math.min(prev + 1, 55));
+                  }
                 }
               } catch {
-                clearInterval(pollInterval);
-                setCurrentStage('error');
-                setResult({ success: false, message: '查询任务状态失败', questions: [] });
+                consecutiveFailures++;
+                if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                  clearInterval(pollInterval);
+                  setUploading(false);
+                  setCurrentStage('error');
+                  setResult({ success: false, message: '查询任务状态连续失败，请检查网络后重试', questions: [] });
+                }
               }
             }, 3000);
-            setStageProgress(20);
+            setCurrentStage('ocr');
+            setStageProgress(5);
           } else {
+            setUploading(false);
             setCurrentStage('error');
             setResult({ success: false, message: data.error || '创建异步任务失败', questions: [] });
           }
         } catch (error) {
           setCurrentStage('error');
+          setUploading(false);
           setResult({ success: false, message: '网络错误，请重试', questions: [] });
         }
-        setUploading(false);
         return;
       }
 
@@ -153,13 +207,8 @@ export default function ImportPage() {
       formData.append('autoMatchTags', autoMatchTags.toString());
       formData.append('grade', selectedGrade);
 
-      // 模拟进度更新
-      const progressInterval = setInterval(() => {
-        setStageProgress(prev => {
-          if (prev >= 90) return prev;
-          return prev + Math.random() * 15;
-        });
-      }, 800);
+      // 显示上传+识别阶段，由服务器端实际耗时驱动
+      setStageProgress(10); // 开始上传
 
       try {
         const res = await fetch('/api/import/ocr', {
@@ -167,7 +216,6 @@ export default function ImportPage() {
           body: formData,
         });
 
-        clearInterval(progressInterval);
         setStageProgress(100);
 
         const data = await res.json();
@@ -192,7 +240,6 @@ export default function ImportPage() {
           });
         }
       } catch (error) {
-        clearInterval(progressInterval);
         setCurrentStage('error');
         setResult({
           success: false,
@@ -350,6 +397,7 @@ export default function ImportPage() {
       });
 
       if (res.ok) {
+        const data = await res.json();
         setCurrentStage('completed');
         setResult({
           success: true,
@@ -357,7 +405,12 @@ export default function ImportPage() {
           total: questions.length,
           questions: [],
         });
-        setQuestions([]);
+
+        // 5 秒撤销机制
+        if (data.importedIds && data.importedIds.length > 0) {
+          setUndoJobItems(data.importedIds);
+          setUndoTimer(5);
+        }
       } else {
         const data = await res.json();
         alert(data.error || '确认导入失败');
@@ -369,11 +422,32 @@ export default function ImportPage() {
     setConfirming(false);
   };
 
-  // 返回预览模式
-  const handleBackToPreview = () => {
-    setCurrentStage('preview');
+  // 撤销导入
+  const handleUndoImport = async () => {
+    if (undoJobItems.length === 0) return;
+    try {
+      await fetch('/api/questions/batch', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: undoJobItems }),
+      });
+      setUndoJobItems([]);
+      setUndoTimer(0);
+      setResult({ success: true, message: '已撤销导入，题目已删除', total: 0, questions: [] });
+    } catch {
+      alert('撤销失败，请手动删除');
+    }
+  };
+
+  // 重新上传：回到初始文件选择状态
+  const handleReUpload = () => {
+    setCurrentStage('uploading');
     setFiles([]);
     setResult(null);
+    setQuestions([]);
+    setSelectedIds(new Set());
+    setPdfUrl(null);
+    setStageProgress(0);
   };
 
   return (
@@ -468,56 +542,7 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* 预览模式 - 批量操作工具栏 */}
-      {currentStage === 'preview' && questions.length > 0 && (
-        <div className="bg-muted/50 p-4 rounded-xl border border-border flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={selectedIds.size === questions.length && questions.length > 0}
-                onChange={handleSelectAll}
-                className="w-4 h-4 rounded text-primary"
-              />
-              <span className="text-sm text-foreground">
-                全选 ({selectedIds.size}/{questions.length})
-              </span>
-            </label>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowBatchTagDialog(true)}
-              disabled={selectedIds.size === 0}
-              className="border-border hover:bg-muted rounded-xl"
-            >
-              <Tag className="w-4 h-4 mr-1" />
-              批量打标签
-            </Button>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">
-              共 {questions.length} 道题目待确认
-            </span>
-            <Button
-              onClick={handleConfirmImport}
-              disabled={confirming}
-              className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl"
-            >
-              {confirming ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  导入中...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  确认导入
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
+
 
       <div className="card-elevated p-6">
         {/* 上传状态 */}
@@ -545,7 +570,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {files.length > 0 && (
+        {files.length > 0 && currentStage !== 'preview' && (
           <div className="mt-6">
             <h3 className="font-medium text-foreground mb-2">已选择文件：</h3>
             <ul className="space-y-2">
@@ -562,15 +587,17 @@ export default function ImportPage() {
             {uploading && activeTab === 'pdf' && (
               <div className="mt-6 space-y-4">
                 {/* 进度条 */}
-                <div className="w-full bg-muted rounded-full h-2">
+                <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
                   <div
-                    className="bg-primary h-2 rounded-full transition-all duration-300"
+                    className={`h-3 rounded-full transition-all duration-500 ${
+                      currentStage === 'error' ? 'bg-error' : 'bg-primary'
+                    }`}
                     style={{ width: `${Math.min(stageProgress, 100)}%` }}
                   />
                 </div>
 
-                {/* 当前阶段 */}
-                <div className="flex items-center gap-3 p-3 bg-primary/5 rounded-xl border border-primary/10">
+                {/* 当前阶段 - 动态展示实时进度 */}
+                <div className="flex items-center gap-3 p-4 bg-primary/5 rounded-xl border border-primary/10">
                   <div className="text-primary">
                     {stageInfo[currentStage].icon}
                   </div>
@@ -579,18 +606,50 @@ export default function ImportPage() {
                       {stageInfo[currentStage].label}
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {stageInfo[currentStage].description}
+                      {currentStage === 'ocr'
+                        ? '正在调用 MinerU API 进行 PDF 文字识别与题目分割...'
+                        : currentStage === 'tagging'
+                          ? `正在匹配知识标签...`
+                          : stageInfo[currentStage].description}
                     </div>
                   </div>
-                  <div className="text-sm text-primary font-medium">
-                    {Math.round(Math.min(stageProgress, 100))}%
+                  <div className="text-right">
+                    <div className="text-lg font-semibold text-primary">
+                      {Math.round(Math.min(stageProgress, 100))}%
+                    </div>
+                    {currentStage === 'tagging' && (
+                      <div className="text-xs text-muted-foreground">
+                        标签匹配中
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* 处理流程说明 */}
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <p>处理流程：上传 → OCR识别 → 题目分割 → 标签匹配 → 预览编辑</p>
-                  <p>根据PDF页数和题目数量，处理时间可能需要 30秒-2分钟</p>
+                {/* 处理流程步骤指示器 */}
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  {[
+                    { key: 'uploading', label: '上传' },
+                    { key: 'ocr', label: 'OCR识别' },
+                    { key: 'splitting', label: '题目分割' },
+                    { key: 'tagging', label: '标签匹配' },
+                    { key: 'preview', label: '预览编辑' },
+                  ].map((step, idx) => {
+                    const stageOrder = ['uploading', 'ocr', 'ocr', 'tagging', 'preview'];
+                    const currentIdx = stageOrder.indexOf(currentStage);
+                    const isActive = idx <= currentIdx;
+                    const isCurrent = (currentStage === 'ocr' && (idx === 1 || idx === 2)) || stageOrder[idx] === currentStage;
+                    return (
+                      <div key={step.key} className="flex items-center gap-1">
+                        <div className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                          isCurrent ? 'bg-primary animate-pulse' : isActive ? 'bg-primary/60' : 'bg-muted-foreground/30'
+                        }`} />
+                        <span className={isCurrent ? 'text-primary font-medium' : ''}>
+                          {step.label}
+                        </span>
+                        {idx < 4 && <div className={`w-6 h-px ${isActive ? 'bg-primary/40' : 'bg-muted-foreground/20'}`} />}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -635,36 +694,82 @@ export default function ImportPage() {
 
         {/* 题目预览列表 - 分栏布局 */}
         {currentStage === 'preview' && questions.length > 0 && (
-          <div className="mt-6 flex gap-4" style={{ minHeight: '600px' }}>
+          <div className="mt-4 flex gap-4" style={{ height: 'calc(100vh - 260px)' }}>
             {/* 左侧：PDF 预览 */}
             {pdfUrl && (
-              <div className="w-[45%] shrink-0 border border-border rounded-xl overflow-hidden bg-muted/10">
-                <div className="bg-muted/30 px-4 py-2 border-b border-border flex items-center justify-between">
+              <div className="w-[45%] shrink-0 border border-border rounded-xl overflow-hidden bg-muted/10 flex flex-col">
+                <div className="bg-muted/30 px-4 py-2 border-b border-border flex items-center justify-between shrink-0">
                   <h3 className="text-sm font-medium text-foreground">PDF 原文预览</h3>
                 </div>
                 <iframe
                   src={pdfUrl}
-                  className="w-full"
-                  style={{ height: '600px' }}
+                  className="w-full flex-1"
                   title="PDF预览"
                 />
               </div>
             )}
 
-            {/* 右侧：题目列表 */}
-            <div className={`${pdfUrl ? 'flex-1' : 'w-full'} space-y-3`}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-medium text-foreground">题目预览（共 {questions.length} 道）</h3>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleBackToPreview}
-                  className="border-border hover:bg-muted rounded-xl"
-                >
-                  重新上传
-                </Button>
+            {/* 右侧：题目列表 + 批量操作 */}
+            <div className={`${pdfUrl ? 'flex-1' : 'w-full'} flex flex-col`} style={{ minWidth: 0 }}>
+              {/* 批量操作工具栏 */}
+              <div className="bg-muted/50 p-3 rounded-xl border border-border flex items-center justify-between shrink-0 mb-3">
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.size === questions.length && questions.length > 0}
+                      onChange={handleSelectAll}
+                      className="w-4 h-4 rounded text-primary"
+                    />
+                    <span className="text-sm text-foreground">
+                      全选 ({selectedIds.size}/{questions.length})
+                    </span>
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowBatchTagDialog(true)}
+                    disabled={selectedIds.size === 0}
+                    className="border-border hover:bg-muted rounded-xl"
+                  >
+                    <Tag className="w-4 h-4 mr-1" />
+                    批量打标签
+                  </Button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">
+                    共 {questions.length} 道
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReUpload}
+                    className="border-border hover:bg-muted rounded-xl"
+                  >
+                    重新上传
+                  </Button>
+                  <Button
+                    onClick={handleConfirmImport}
+                    disabled={confirming}
+                    className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl"
+                  >
+                    {confirming ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        导入中...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        确认导入
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-3 max-h-[600px] overflow-y-auto">
+
+              {/* 题目卡片列表 */}
+              <div className="space-y-3 overflow-y-auto flex-1 pr-1">
                 {questions.map((question, idx) => (
                   <QuestionCard
                     key={question.id}
@@ -709,6 +814,16 @@ export default function ImportPage() {
             {/* 操作按钮 */}
             {currentStage === 'completed' && (
               <div className="mt-4 flex gap-2">
+                {undoTimer > 0 && (
+                  <Button
+                    size="sm"
+                    onClick={handleUndoImport}
+                    className="bg-error hover:bg-error/90 text-white rounded-xl"
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    撤销导入 ({undoTimer}s)
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -720,7 +835,7 @@ export default function ImportPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleBackToPreview}
+                  onClick={handleReUpload}
                   className="border-border hover:bg-muted rounded-xl"
                 >
                   继续导入
@@ -738,6 +853,7 @@ export default function ImportPage() {
         onConfirm={handleBatchTag}
       />
 
+      {currentStage !== 'preview' && (
       <div className="bg-muted/50 p-5 rounded-xl border border-border text-sm text-foreground">
         <h3 className="font-medium text-foreground mb-2">使用说明：</h3>
         <ul className="list-disc list-inside space-y-1 text-muted-foreground">
@@ -758,6 +874,7 @@ export default function ImportPage() {
           )}
         </ul>
       </div>
+      )}
     </div>
   );
 }

@@ -112,7 +112,7 @@ export function parseContentToSegments(text: string): ContentSegment[] {
 
     if (nextFormulaIdx >= 0 && nextFormulaIdx === lastIndex) {
       const match = formulaPattern.exec(remaining)!;
-      const isBlock = match[1].startsWith('$$') || match[1].startsWith('\\[');
+      const isBlock = match[1].startsWith('\\[');
       segments.push({
         type: isBlock ? 'block-formula' : 'inline-formula',
         content: match[1].replace(/^\$\$|\$\$$|^\\\[|\\\]$|^\\\(|\\\)$/g, '').replace(/^\$|\$$/, ''),

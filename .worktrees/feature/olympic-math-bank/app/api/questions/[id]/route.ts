@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
+import { normalizeQuestionType } from '@/lib/utils/question-type';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,15 +28,7 @@ export async function GET(
             include: {
               parent: {
                 include: {
-                  parent: {
-                    include: {
-                      parent: {
-                        include: {
-                          parent: true,
-                        },
-                      },
-                    },
-                  },
+                  parent: true, // 仅三层，减少不必要的五层嵌套
                 },
               },
             },
@@ -49,7 +42,9 @@ export async function GET(
     return NextResponse.json({ error: 'Question not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ question });
+  return NextResponse.json({
+    question: { ...question, type: normalizeQuestionType(question.type) },
+  });
 }
 
 export async function PUT(
@@ -83,12 +78,35 @@ export async function PUT(
     const nextVersion = (latestVersion?.version ?? 0) + 1;
 
     const changedFields: string[] = [];
-    if (currentQuestion.content !== content) changedFields.push('题干');
-    if (currentQuestion.answer !== answer) changedFields.push('答案');
-    if (currentQuestion.solution !== (solution || null)) changedFields.push('解析');
+    const changes: string[] = [];
+    
+    if (currentQuestion.content !== content) {
+      changedFields.push('题干');
+      changes.push(`题干: "${currentQuestion.content?.substring(0, 30)}..." → "${content?.substring(0, 30)}..."`);
+    }
+    if (currentQuestion.answer !== answer) {
+      changedFields.push('答案');
+      changes.push(`答案变更`);
+    }
+    if (currentQuestion.solution !== (solution || null)) {
+      changedFields.push('解析');
+      changes.push(`解析变更`);
+    }
+    if (currentQuestion.type !== type) {
+      changedFields.push('题型');
+      changes.push(`题型: ${currentQuestion.type} → ${type}`);
+    }
+    if (currentQuestion.grade !== grade) {
+      changedFields.push('年级');
+      changes.push(`年级: ${currentQuestion.grade} → ${grade}`);
+    }
+    if (currentQuestion.difficulty !== difficulty) {
+      changedFields.push('难度');
+      changes.push(`难度: ${currentQuestion.difficulty} → ${difficulty}`);
+    }
 
     const changeLog = changedFields.length > 0
-      ? `修改了: ${changedFields.join('、')}`
+      ? `修改了: ${changedFields.join('、')}。${changes.slice(0, 3).join('; ')}`
       : '修改了题目属性';
 
     await prisma.questionVersion.create({
@@ -102,7 +120,7 @@ export async function PUT(
         formulas: currentQuestion.formulas,
         sourceBlocks: currentQuestion.sourceBlocks,
         changeLog,
-        createdById: (session.user as any)?.id || 'default',
+        createdById: currentQuestion.createdById,
       },
     });
   }
@@ -144,5 +162,5 @@ export async function PUT(
     }
   }
 
-  return NextResponse.json(question);
+  return NextResponse.json({ ...question, type: normalizeQuestionType(question.type) });
 }

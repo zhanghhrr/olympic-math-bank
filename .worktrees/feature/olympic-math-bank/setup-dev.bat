@@ -49,6 +49,11 @@ echo.
 echo 🗄️  生成 Prisma Client...
 call npx prisma generate
 
+REM 执行数据库迁移（确保 Schema 与数据库结构一致）
+echo.
+echo 🔄 执行数据库迁移...
+call npm run db:migrate
+
 echo.
 echo ==========================================
 echo ✅ 设置完成！

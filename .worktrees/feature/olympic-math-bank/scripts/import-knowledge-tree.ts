@@ -27,10 +27,12 @@ async function importKnowledgeTree() {
 
     console.log(`开始导入 ${records.length} 条知识标签记录...`);
 
-    // 清空现有知识标签
-    await prisma.questionKnowledgeTag.deleteMany();
-    await prisma.knowledgeTag.deleteMany();
-    console.log('已清空现有知识标签');
+    // 在事务中清空并重新导入，防止中途崩溃导致数据丢失
+    await prisma.$transaction(async (tx) => {
+      await tx.questionKnowledgeTag.deleteMany();
+      await tx.knowledgeTag.deleteMany();
+      console.log('已清空现有知识标签');
+    });
 
     // 用于存储已创建的节点，避免重复
     const createdNodes = new Map<string, string>(); // key: code, value: id

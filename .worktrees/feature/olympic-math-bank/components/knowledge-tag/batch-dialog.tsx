@@ -22,6 +22,7 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -32,6 +33,9 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
           setLoading(false);
         })
         .catch(() => setLoading(false));
+      // 重置搜索和选中状态
+      setSearchText('');
+      setSelectedTagIds(new Set());
     }
   }, [isOpen]);
 
@@ -72,6 +76,13 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = expandedNodes.has(node.id);
     const isSelected = selectedTagIds.has(node.id);
+
+    // 搜索过滤：如果节点名包含搜索词，或子节点有匹配，则显示
+    if (searchText.trim()) {
+      const matchesSelf = node.name.toLowerCase().includes(searchText.toLowerCase());
+      const childrenMatch = node.children?.some(c => nodeMatchesSearch(c, searchText));
+      if (!matchesSelf && !childrenMatch) return null;
+    }
 
     return (
       <div key={node.id}>
@@ -124,6 +135,13 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
     );
   };
 
+  // 递归检查节点是否匹配搜索
+  const nodeMatchesSearch = (node: KnowledgeTagNode, search: string): boolean => {
+    if (node.name.toLowerCase().includes(search.toLowerCase())) return true;
+    if (node.children) return node.children.some(c => nodeMatchesSearch(c, search));
+    return false;
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -143,6 +161,48 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
           >
             <X className="w-5 h-5 text-muted-foreground" />
           </button>
+        </div>
+
+        {/* 搜索框 */}
+        <div className="px-4 pt-3">
+          <input
+            type="text"
+            placeholder="搜索标签名..."
+            value={searchText}
+            onChange={(e) => {
+              setSearchText(e.target.value);
+              // 搜索时自动展开匹配节点的祖先
+              if (e.target.value.trim()) {
+                const newExpanded = new Set<string>();
+                const collectAncestors = (nodes: KnowledgeTagNode[], targetId: string, path: string[]): boolean => {
+                  for (const node of nodes) {
+                    if (node.id === targetId) {
+                      path.forEach(id => newExpanded.add(id));
+                      return true;
+                    }
+                    if (node.children && collectAncestors(node.children, targetId, [...path, node.id])) {
+                      return true;
+                    }
+                  }
+                  return false;
+                };
+                const findMatchingIds = (nodes: KnowledgeTagNode[]): string[] => {
+                  const ids: string[] = [];
+                  for (const node of nodes) {
+                    if (node.name.toLowerCase().includes(e.target.value.toLowerCase())) {
+                      ids.push(node.id);
+                    }
+                    if (node.children) ids.push(...findMatchingIds(node.children));
+                  }
+                  return ids;
+                };
+                const matchingIds = findMatchingIds(tree);
+                matchingIds.forEach(id => collectAncestors(tree, id, []));
+                if (newExpanded.size > 0) setExpandedNodes(newExpanded);
+              }
+            }}
+            className="input-field text-sm"
+          />
         </div>
 
         {/* Tree Content */}

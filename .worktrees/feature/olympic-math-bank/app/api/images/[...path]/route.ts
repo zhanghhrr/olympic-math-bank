@@ -7,36 +7,31 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path: pathParts } = await params;
-  const filename = pathParts[pathParts.length - 1];
 
-  // 搜索 uploads/ocr 下所有包含此文件的目录
-  const uploadsDir = path.join(process.cwd(), 'uploads', 'ocr');
-
-  function findFile(dir: string, filename: string): string | null {
-    if (!fs.existsSync(dir)) return null;
-
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        // 如果是 images 子目录，在其中查找文件
-        if (entry.name === 'images') {
-          const imagesDir = fullPath;
-          const files = fs.readdirSync(imagesDir);
-          if (files.includes(filename)) {
-            return path.join(imagesDir, filename);
-          }
-        }
-        // 递归搜索子目录
-        const found = findFile(fullPath, filename);
-        if (found) return found;
-      }
-    }
-    return null;
+  if (pathParts.length === 0) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
   }
 
-  const filePath = findFile(uploadsDir, filename);
+  const uploadsDir = path.join(process.cwd(), 'uploads', 'ocr');
+
+  let filePath: string | null = null;
+
+  // 新格式: /api/images/<baseName>/<filename> — OCR 导入时将目录前缀写入路径
+  // 直接定位: uploads/ocr/<baseName>/images/<filename>
+  if (pathParts.length >= 2) {
+    const baseName = pathParts[0];
+    const filename = pathParts[pathParts.length - 1];
+    const directPath = path.join(uploadsDir, baseName, 'images', filename);
+    if (fs.existsSync(directPath)) {
+      filePath = directPath;
+    }
+  }
+
+  // 旧格式（向后兼容）: /api/images/<filename> — 递归按文件名搜索
+  if (!filePath) {
+    const filename = pathParts[pathParts.length - 1];
+    filePath = findFileRecursive(uploadsDir, filename);
+  }
 
   if (!filePath) {
     return NextResponse.json({ error: 'Image not found' }, { status: 404 });
@@ -46,6 +41,7 @@ export async function GET(
   const fileBuffer = fs.readFileSync(filePath);
 
   // 获取 MIME 类型
+  const filename = pathParts[pathParts.length - 1];
   const ext = path.extname(filename).toLowerCase();
   const mimeTypes: Record<string, string> = {
     '.jpg': 'image/jpeg',
@@ -63,4 +59,26 @@ export async function GET(
       'Cache-Control': 'public, max-age=31536000',
     },
   });
+}
+
+/** 递归按文件名搜索（旧格式兼容，避免破坏已有引用） */
+function findFileRecursive(dir: string, filename: string): string | null {
+  if (!fs.existsSync(dir)) return null;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'images') {
+        const files = fs.readdirSync(fullPath);
+        if (files.includes(filename)) {
+          return path.join(fullPath, filename);
+        }
+      }
+      const found = findFileRecursive(fullPath, filename);
+      if (found) return found;
+    }
+  }
+  return null;
 }

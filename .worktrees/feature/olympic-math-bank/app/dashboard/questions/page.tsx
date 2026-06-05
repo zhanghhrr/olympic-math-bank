@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous, ShoppingCart, Settings, Download, Tag } from 'lucide-react';
+import { Plus, Search, ChevronDown, ChevronUp, ChevronRight, Copy, Edit3, FileText, Check, Star, Filter, X, TreeDeciduous, ShoppingCart, Settings, Download, Tag, ArrowUpDown } from 'lucide-react';
 import { QuestionContent } from '@/components/QuestionContent';
 import { BatchTagDialog } from '@/components/knowledge-tag/batch-dialog';
+import { Pagination } from '@/components/ui/pagination';
 
 interface KnowledgeTagTreeNode {
   id: string;
@@ -402,7 +403,7 @@ export default function QuestionsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState({ status: '', grade: '', type: '' });
+  const [filter, setFilter] = useState({ status: '', grade: '', type: '', difficulty: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [tagTree, setTagTree] = useState<KnowledgeTagTreeNode[]>([]);
   const [tagSearch, setTagSearch] = useState('');
@@ -411,22 +412,60 @@ export default function QuestionsPage() {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [showTagSidebar, setShowTagSidebar] = useState(true);
 
+  // 分页状态
+  const [page, setPage] = useState(1);
+  const [limit] = useState(20);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // 排序状态
+  const [sortBy, setSortBy] = useState('updatedAt');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
   // 购物车选中的题目 IDs
-  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(() => {
+    // 从 localStorage 恢复购物车
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('questionCart');
+        if (saved) return new Set(JSON.parse(saved));
+      } catch {}
+    }
+    return new Set<string>();
+  });
   const [showBatchEdit, setShowBatchEdit] = useState(false);
   const [batchGrade, setBatchGrade] = useState('');
   const [batchDifficulty, setBatchDifficulty] = useState('');
   const [showBatchTagDialog, setShowBatchTagDialog] = useState(false);
   const [batchUpdating, setBatchUpdating] = useState(false);
 
+  // 购物车持久化到 localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined' && selectedQuestionIds.size > 0) {
+      localStorage.setItem('questionCart', JSON.stringify(Array.from(selectedQuestionIds)));
+    } else if (typeof window !== 'undefined') {
+      localStorage.removeItem('questionCart');
+    }
+  }, [selectedQuestionIds]);
+
   useEffect(() => {
     fetchTagTree();
   }, []);
 
-  // 监听所有筛选条件变化，自动刷新题目
+  // 监听所有筛选条件变化，重置到第一页并刷新题目
+  useEffect(() => {
+    if (page === 1) {
+      // 已在第一页，直接刷新
+      fetchQuestions();
+    } else {
+      // 不在第一页，重置页码（会触发分页 useEffect 自动刷新）
+      setPage(1);
+    }
+  }, [filter.status, filter.grade, filter.type, filter.difficulty, search, selectedTagId, selectedTagIds]);
+
+  // 分页/排序变化时刷新题目
   useEffect(() => {
     fetchQuestions();
-  }, [filter.status, filter.grade, filter.type, search, selectedTagId, selectedTagIds]);
+  }, [page, sortBy, sortOrder]);
 
   const fetchTagTree = async () => {
     try {
@@ -444,15 +483,21 @@ export default function QuestionsPage() {
       if (filter.status) params.append('status', filter.status);
       if (filter.grade) params.append('grade', filter.grade);
       if (filter.type) params.append('type', filter.type);
+      if (filter.difficulty) params.append('difficulty', filter.difficulty);
       if (search) params.append('search', search);
       if (selectedTagIds.length > 0) {
         params.append('knowledgeTagIds', selectedTagIds.join(','));
       }
+      params.append('page', String(page));
+      params.append('limit', String(limit));
+      params.append('sortBy', sortBy);
+      params.append('sortOrder', sortOrder);
 
       const res = await fetch(`/api/questions?${params}`);
       const data = await res.json();
       setQuestions(data.questions || []);
       setTotalCount(data.pagination?.total || 0);
+      setTotalPages(data.pagination?.totalPages || 1);
     } catch (error) {
       console.error('Failed to fetch questions:', error);
     } finally {
@@ -556,6 +601,26 @@ export default function QuestionsPage() {
     });
   };
 
+  // 跨页全选：获取当前筛选条件下所有题目的 ID
+  const handleSelectAllFiltered = async () => {
+    const params = new URLSearchParams();
+    if (filter.status) params.append('status', filter.status);
+    if (filter.grade) params.append('grade', filter.grade);
+    if (filter.type) params.append('type', filter.type);
+    if (filter.difficulty) params.append('difficulty', filter.difficulty);
+    if (search) params.append('search', search);
+    if (selectedTagIds.length > 0) params.append('knowledgeTagIds', selectedTagIds.join(','));
+    params.append('limit', '1000');
+    params.append('fields', 'id');
+
+    try {
+      const res = await fetch(`/api/questions?${params}`);
+      const data = await res.json();
+      const allIds = (data.questions || []).map((q: { id: string }) => q.id);
+      setSelectedQuestionIds(new Set(allIds));
+    } catch {}
+  };
+
   // 全选/取消全选当前页
   const handleSelectAllCurrentPage = () => {
     const currentPageIds = questions.map(q => q.id);
@@ -620,7 +685,7 @@ export default function QuestionsPage() {
     }
   };
 
-  const handleExport = async (format: 'json' | 'csv' | 'md') => {
+  const handleExport = async (format: 'json' | 'csv' | 'md' | 'xlsx') => {
     const ids = Array.from(selectedQuestionIds);
     try {
       const res = await fetch(`/api/export/${format}`, {
@@ -775,16 +840,38 @@ export default function QuestionsPage() {
               >
                 <Filter className="w-4 h-4" />
                 筛选
-                {(filter.status || filter.grade || filter.type) && (
+                {(filter.status || filter.grade || filter.type || filter.difficulty) && (
                   <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
-                    {(filter.status ? 1 : 0) + (filter.grade ? 1 : 0) + (filter.type ? 1 : 0)}
+                    {(filter.status ? 1 : 0) + (filter.grade ? 1 : 0) + (filter.type ? 1 : 0) + (filter.difficulty ? 1 : 0)}
                   </span>
                 )}
               </button>
+              {/* 排序下拉框 */}
+              <div className="relative flex items-center gap-2">
+                <ArrowUpDown className="w-4 h-4 text-muted-foreground" />
+                <select
+                  value={`${sortBy}-${sortOrder}`}
+                  onChange={(e) => {
+                    const [field, order] = e.target.value.split('-');
+                    setSortBy(field);
+                    setSortOrder(order as 'asc' | 'desc');
+                  }}
+                  className="select-field text-sm h-10"
+                >
+                  <option value="updatedAt-desc">最近更新</option>
+                  <option value="updatedAt-asc">最早更新</option>
+                  <option value="createdAt-desc">最近创建</option>
+                  <option value="createdAt-asc">最早创建</option>
+                  <option value="difficulty-desc">难度高→低</option>
+                  <option value="difficulty-asc">难度低→高</option>
+                  <option value="grade-desc">年级高→低</option>
+                  <option value="grade-asc">年级低→高</option>
+                </select>
+              </div>
             </div>
 
             {showFilters && (
-              <div className="mt-4 pt-4 border-t border-border grid grid-cols-3 gap-4 items-end">
+              <div className="mt-4 pt-4 border-t border-border grid grid-cols-4 gap-4 items-end">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">状态</label>
                   <select
@@ -829,11 +916,26 @@ export default function QuestionsPage() {
                     <option value="CALCULATION">计算题</option>
                   </select>
                 </div>
-                <div className="col-span-3 flex justify-end gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">难度</label>
+                  <select
+                    value={filter.difficulty}
+                    onChange={(e) => { setFilter({ ...filter, difficulty: e.target.value }); }}
+                    className="select-field select-field-full"
+                  >
+                    <option value="">全部</option>
+                    <option value="1">★</option>
+                    <option value="2">★★</option>
+                    <option value="3">★★★</option>
+                    <option value="4">★★★★</option>
+                    <option value="5">★★★★★</option>
+                  </select>
+                </div>
+                <div className="col-span-4 flex justify-end gap-2">
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { setFilter({ status: '', grade: '', type: '' }); }}
+                    onClick={() => { setFilter({ status: '', grade: '', type: '', difficulty: '' }); }}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     重置
@@ -848,6 +950,15 @@ export default function QuestionsPage() {
 
           {/* 题目列表 */}
           <div className="space-y-4">
+            {/* 顶部翻页栏 */}
+            {questions.length > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  共 {totalCount} 道题目，第 {page}/{totalPages} 页
+                </span>
+                <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+              </div>
+            )}
             {questions.length === 0 ? (
               <div className="card-elevated p-12 text-center">
                 <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-muted flex items-center justify-center">
@@ -876,6 +987,14 @@ export default function QuestionsPage() {
                     />
                     <span>全选当前页</span>
                   </div>
+                  <button
+                    onClick={handleSelectAllFiltered}
+                    className="text-sm text-primary hover:underline"
+                    disabled={totalCount > 1000}
+                    title={totalCount > 1000 ? '超过1000题，暂时不支持全选' : '全选筛选结果中的所有题目'}
+                  >
+                    全选全部 ({totalCount}题)
+                  </button>
                   <div>
                     共 {totalCount} 道题目
                     {selectedTagId && <span className="text-primary ml-2">(已按标签筛选)</span>}
@@ -889,6 +1008,8 @@ export default function QuestionsPage() {
                     onSelectToggle={handleSelectQuestion}
                   />
                 ))}
+                {/* 底部翻页栏 */}
+                <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
               </>
             )}
           </div>
@@ -996,6 +1117,10 @@ export default function QuestionsPage() {
             >
               <Tag className="w-4 h-4 mr-1" />
               批量打标签
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => handleExport('xlsx')} className="text-muted-foreground hover:text-foreground">
+              <Download className="w-4 h-4 mr-1" />
+              Excel
             </Button>
             <Button variant="ghost" size="sm" onClick={() => handleExport('json')} className="text-muted-foreground hover:text-foreground">
               <Download className="w-4 h-4 mr-1" />

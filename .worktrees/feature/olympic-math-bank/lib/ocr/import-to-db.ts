@@ -56,13 +56,27 @@ export async function smartImportFromOCR(
     questions: [],
   };
 
+  // 预处理所有题目数据，收集成功后批量写入
+  const toCreate: Array<{
+    content: string;
+    answer: string;
+    solution: string;
+    type: QuestionType;
+    grade: Grade;
+    difficulty: number;
+    source: string;
+    status: QuestionStatus;
+    createdById: string;
+    formulas: any;
+    sourceBlocks: string | null;
+  }> = [];
+  const tagRelations: Array<{ questionIdx: number; tagIds: string[] }> = [];
+  const failedItems: Array<{ error: string }> = [];
+
   for (const ocrResult of ocrResults) {
     if (!ocrResult.success || !ocrResult.parsed) {
       result.failed++;
-      result.questions.push({
-        success: false,
-        error: ocrResult.error || 'OCR识别失败',
-      });
+      failedItems.push({ error: ocrResult.error || 'OCR识别失败' });
       continue;
     }
 
@@ -101,64 +115,104 @@ export async function smartImportFromOCR(
         }
       }
 
-      const question = await importPrisma.question.create({
-        data: {
-          content: cleanedContent,
-          answer: parsed.answer || '',
-          solution: parsed.analysis || '',
-          type: questionType,
-          grade: grade,
-          difficulty: difficulty,
-          source: source,
-          status: QuestionStatus.DRAFT,
-          createdById: userId,
-          formulas: verifiedFormulas,
-          sourceBlocks: parsed.sourceBlocks || null,
-        },
+      toCreate.push({
+        content: cleanedContent,
+        answer: parsed.answer || '',
+        solution: parsed.analysis || '',
+        type: questionType,
+        grade: grade as Grade,
+        difficulty,
+        source,
+        status: QuestionStatus.DRAFT,
+        createdById: userId,
+        formulas: verifiedFormulas,
+        sourceBlocks: parsed.sourceBlocks || null,
       });
 
       if (matchedTagIds.length > 0) {
-        for (const tagId of matchedTagIds) {
-          await importPrisma.questionKnowledgeTag.create({
-            data: {
-              questionId: question.id,
-              knowledgeTagId: tagId,
-            },
-          });
+        tagRelations.push({ questionIdx: toCreate.length - 1, tagIds: matchedTagIds });
+      }
+    } catch (error) {
+      console.error(`[Import Error] 题目导入失败:`, error);
+      result.failed++;
+      failedItems.push({ error: error instanceof Error ? error.message : '导入失败' });
+    }
+  }
+
+  // 批量写入题目
+  if (toCreate.length > 0) {
+    try {
+      await importPrisma.$transaction(async (tx) => {
+        const created = await tx.question.createMany({ data: toCreate });
+        return created;
+      });
+
+      // 查询刚创建的题目以获取 ID
+      const createdQuestions = await importPrisma.question.findMany({
+        where: { createdById: userId, source, status: QuestionStatus.DRAFT },
+        orderBy: { createdAt: 'desc' },
+        take: toCreate.length,
+      });
+
+      // 构建标签关联
+      const tagCreateData: Array<{ questionId: string; knowledgeTagId: string }> = [];
+      const successResults: Array<{ questionId: string; matchedTags: string[] }> = [];
+
+      for (let i = 0; i < tagRelations.length; i++) {
+        const { questionIdx, tagIds } = tagRelations[i];
+        // 反向映射：createdQuestions 是按 createdAt desc 排序的
+        const createdIdx = toCreate.length - 1 - questionIdx;
+        const question = createdQuestions[createdIdx];
+        if (question) {
+          successResults.push({ questionId: question.id, matchedTags: tagIds });
+          for (const tagId of tagIds) {
+            tagCreateData.push({ questionId: question.id, knowledgeTagId: tagId });
+          }
         }
       }
 
-      result.success++;
-      let matchedTagDetails: Array<{id: string; name: string; path: string; hierarchy: any}> = [];
-      if (matchedTagIds.length > 0) {
+      if (tagCreateData.length > 0) {
+        await importPrisma.questionKnowledgeTag.createMany({ data: tagCreateData });
+      }
+
+      result.success = toCreate.length;
+
+      // 构建返回详情
+      for (const sr of successResults) {
         const matchedTags = await importPrisma.knowledgeTag.findMany({
-          where: { id: { in: matchedTagIds } },
+          where: { id: { in: sr.matchedTags } },
           include: {
             parent: { include: { parent: { include: { parent: { include: { parent: true } } } } } }
           }
         });
-        matchedTagDetails = matchedTags.map(tag => ({
-          id: tag.id,
-          name: tag.name,
-          path: getTagPath(tag),
-          hierarchy: getTagHierarchy(tag),
-        }));
+        result.questions.push({
+          success: true,
+          questionId: sr.questionId,
+          matchedTags: sr.matchedTags,
+          matchedTagDetails: matchedTags.map(tag => ({
+            id: tag.id,
+            name: tag.name,
+            path: getTagPath(tag),
+            hierarchy: getTagHierarchy(tag),
+          })),
+        });
       }
-
-      result.questions.push({
-        success: true,
-        questionId: question.id,
-        matchedTags: matchedTagIds,
-        matchedTagDetails,
-      });
     } catch (error) {
-      console.error(`[Import Error] 题目导入失败:`, error);
-      result.failed++;
-      result.questions.push({
-        success: false,
-        error: error instanceof Error ? error.message : '导入失败',
-      });
+      console.error(`[Import Error] 批量写入失败:`, error);
+      // 批量写入失败时，所有题目都标记为失败
+      for (const _ of toCreate) {
+        result.failed++;
+        result.questions.push({
+          success: false,
+          error: error instanceof Error ? error.message : '批量写入失败',
+        });
+      }
     }
+  }
+
+  // 追加预处理阶段的失败项
+  for (const fi of failedItems) {
+    result.questions.push({ success: false, error: fi.error });
   }
 
   return result;

@@ -157,6 +157,7 @@ export async function POST(request: NextRequest) {
       total: questions.length,
       successCount: createdQuestions.length,
       failedCount: 0,
+      importedIds: createdQuestions.map(q => q.id),
     });
   } catch (error) {
     console.error('[Confirm Import] 确认导入失败:', error);

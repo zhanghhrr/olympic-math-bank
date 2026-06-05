@@ -13,6 +13,15 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // 仅审核员和管理员可执行审核操作
+    const userRole = (session.user as any).role;
+    if (userRole !== 'ADMIN' && userRole !== 'REVIEWER') {
+      return NextResponse.json(
+        { error: '无审核权限，仅审核员和管理员可审核题目' },
+        { status: 403 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const { status, comment } = body;
@@ -33,6 +42,14 @@ export async function POST(
       return NextResponse.json(
         { error: '题目不存在' },
         { status: 404 }
+      );
+    }
+
+    // 前置状态校验：只能审核 PENDING 状态的题目
+    if (question.status !== 'PENDING') {
+      return NextResponse.json(
+        { error: '只能审核待审核状态的题目' },
+        { status: 409 }
       );
     }
 

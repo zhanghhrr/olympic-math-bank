@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
+import { normalizeQuestionType } from '@/lib/utils/question-type';
 
 /**
  * 去除题干开头的题号
@@ -29,13 +30,48 @@ export async function GET(request: NextRequest) {
   const createdById = searchParams.get('createdById');
   const tagIds = searchParams.get('tagIds');
   const knowledgeTagIds = searchParams.get('knowledgeTagIds');
+  const sortBy = searchParams.get('sortBy') || 'updatedAt';
+  const sortOrder = (searchParams.get('sortOrder') || 'desc') as 'asc' | 'desc';
+
+  // 白名单校验排序字段，防止 SQL 注入
+  const allowedSortFields = ['createdAt', 'updatedAt', 'difficulty', 'grade'];
+  const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'updatedAt';
+  const safeSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
+
+  const userId = (session.user as any).id as string;
+  const userRole = (session.user as any).role || 'EDITOR';
 
   const where: any = {};
-  if (status) where.status = status;
+
+  // === 可见性范围控制 ===
+  // 规则：DRAFT/REJECTED 仅创建者可见，PENDING 仅审核中心可见，APPROVED 所有人可见
+  if (userRole === 'ADMIN' || userRole === 'REVIEWER') {
+    // 管理员/审核员：无限制，按前端传入参数过滤
+    if (status) where.status = status;
+    if (createdById) where.createdById = createdById;
+  } else {
+    // 编辑者：受限可见
+    if (status === 'DRAFT' || status === 'REJECTED') {
+      // 草稿和已拒绝：仅创建者可见
+      where.status = status;
+      where.createdById = userId;
+    } else if (status === 'PENDING') {
+      // 待审核：仅审核中心可见（编辑者只能看到自己提交的）
+      where.status = status;
+      where.createdById = userId;
+    } else if (status === 'APPROVED') {
+      // 审核通过：所有人可见
+      where.status = status;
+    } else {
+      // 默认（题目管理页）：仅显示审核通过的题目
+      where.status = 'APPROVED';
+    }
+    // 编辑者不能通过 createdById 参数查看他人题目，忽略此参数
+  }
+
   if (type) where.type = type;
   if (grade) where.grade = grade;
   if (difficulty) where.difficulty = parseInt(difficulty);
-  if (createdById) where.createdById = createdById;
   if (search) {
     where.OR = [
       { content: { contains: search } },
@@ -93,7 +129,7 @@ export async function GET(request: NextRequest) {
         },
         _count: { select: { reviews: true } },
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { [safeSortBy]: safeSortOrder },
       skip: (page - 1) * limit,
       take: limit,
     }),
@@ -101,7 +137,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json({
-    questions,
+    questions: questions.map(q => ({ ...q, type: normalizeQuestionType(q.type) })),
     pagination: {
       page,
       limit,

@@ -1,27 +1,26 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db/prisma';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { getTagTree } from '@/lib/ocr/tagging';
 
-// 获取知识标签树形结构
+// 获取知识标签树形结构（带内存缓存）
 export async function GET() {
   try {
-    // 获取所有知识标签
-    const allTags = await prisma.knowledgeTag.findMany({
-      orderBy: [{ level: 'asc' }, { order: 'asc' }],
-      select: {
-        id: true,
-        name: true,
-        level: true,
-        code: true,
-        module: true,
-        topic: true,
-        subtopic: true,
-        knowledge: true,
-        skill: true,
-        parentId: true,
-      }
-    });
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    // 构建树形结构
+    // 复用 tagging 模块的标签树内存缓存
+    const allTags = await getTagTree();
+
+    // 检查孤儿节点（parentId 指向不存在的标签）
+    const existingIds = new Set(allTags.map((t: any) => t.id));
+    for (const tag of allTags) {
+      if (tag.parentId && !existingIds.has(tag.parentId)) {
+        console.warn(`[KnowledgeTag] 孤儿标签: ${tag.name} (id=${tag.id}), parentId=${tag.parentId} 不存在`);
+      }
+    }
     const tagMap = new Map<string, any>();
     const roots: any[] = [];
 

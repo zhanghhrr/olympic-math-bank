@@ -116,7 +116,7 @@ export interface MinerUOptions {
 }
 
 export interface ContentBlock {
-  type: 'text' | 'list' | 'image' | 'table' | 'formula';
+  type: 'text' | 'list' | 'image' | 'text_image' | 'table' | 'formula';
   text: string;
   textLevel?: number;
   bbox: [number, number, number, number];
@@ -394,13 +394,42 @@ async function downloadAndExtract(
   }
 }
 
+/**
+ * 递归搜索目录，返回第一个匹配文件的完整路径
+ * MinerU v4 输出目录结构可能为嵌套（如 subdir/md/xxx.md）或扁平，此函数兼容两种结构
+ */
+function findFileRecursive(dir: string, predicate: (name: string, fullPath: string) => boolean): string | null {
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    // 优先在顶层查找（扁平结构快速路径）
+    for (const entry of entries) {
+      if (entry.isFile() && predicate(entry.name, path.join(dir, entry.name))) {
+        return path.join(dir, entry.name);
+      }
+    }
+    // 递归进入子目录（递归结构慢速路径）
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const found = findFileRecursive(path.join(dir, entry.name), predicate);
+        if (found) return found;
+      }
+    }
+  } catch {
+    // 忽略权限错误等
+  }
+  return null;
+}
+
 function readMarkdown(extractDir: string): string {
   try {
-    const files = fs.readdirSync(extractDir);
-    const mdFile = files.find(f => f.endsWith('.md') || f === 'full.md');
-    if (mdFile) return fs.readFileSync(path.join(extractDir, mdFile), 'utf-8');
-    const txtFile = files.find(f => f.endsWith('.txt'));
-    if (txtFile) return fs.readFileSync(path.join(extractDir, txtFile), 'utf-8');
+    const mdPath = findFileRecursive(extractDir, (name) => name.endsWith('.md'));
+    if (mdPath) {
+      const content = fs.readFileSync(mdPath, 'utf-8');
+      if (content) return content;
+    }
+    // 回退: 尝试 .txt
+    const txtPath = findFileRecursive(extractDir, (name) => name.endsWith('.txt'));
+    if (txtPath) return fs.readFileSync(txtPath, 'utf-8');
     return '';
   } catch {
     return '';
@@ -409,15 +438,16 @@ function readMarkdown(extractDir: string): string {
 
 function readContentListJson(extractDir: string): ContentBlock[] | null {
   try {
-    const files = fs.readdirSync(extractDir);
-    const jsonFile = files.find(f => f.endsWith('_content_list.json'));
-    if (!jsonFile) return null;
+    const jsonPath = findFileRecursive(extractDir, (name) => name.endsWith('_content_list.json'));
+    if (!jsonPath) return null;
 
-    const raw = fs.readFileSync(path.join(extractDir, jsonFile), 'utf-8');
+    const raw = fs.readFileSync(jsonPath, 'utf-8');
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
 
-    return parsed.map((item: any) => ({
+    return parsed
+      .filter((item: any) => item.type !== 'natural_image')
+      .map((item: any) => ({
       type: item.type || 'text',
       text: item.text || '',
       textLevel: item.text_level,
@@ -443,7 +473,7 @@ function extractFormulasFromBlocks(blocks: ContentBlock[]): ContentFormula[] {
   const seen = new Set<string>();
 
   for (const block of blocks) {
-    if (block.type !== 'text' && block.type !== 'list') continue;
+    if (block.type !== 'text' && block.type !== 'list' && block.type !== 'text_image') continue;
     const text = block.type === 'list' ? (block.listItems || []).join('\n') : block.text;
 
     for (const re of [LATEX_DISPLAY_DOLLAR, LATEX_INLINE_DOLLAR]) {
@@ -475,15 +505,24 @@ function readStructuredData(extractDir: string): StructuredOcrData | null {
 
 function saveAllOutputFiles(extractDir: string, outputDir: string, baseName: string): void {
   try {
-    const files = fs.readdirSync(extractDir);
-    for (const file of files) {
-      const src = path.join(extractDir, file);
-      if (fs.statSync(src).isFile()) {
-        const dest = path.join(outputDir, `${baseName}-${file}`);
-        fs.copyFileSync(src, dest);
+    const copyRecursive = (srcDir: string, destDir: string, prefix: string) => {
+      const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const src = path.join(srcDir, entry.name);
+        if (entry.isDirectory()) {
+          // 子目录（如 images/）保持原名递归复制
+          const dest = path.join(destDir, entry.name);
+          if (!fs.existsSync(dest)) fs.mkdirSync(dest, { recursive: true });
+          copyRecursive(src, dest, prefix);
+        } else {
+          // 文件添加 baseName 前缀避免覆盖
+          const dest = path.join(destDir, `${prefix}-${entry.name}`);
+          fs.copyFileSync(src, dest);
+        }
       }
-    }
-    console.log(`  [MinerU v4] 输出文件已保存: ${outputDir}/${baseName}-*`);
+    };
+    copyRecursive(extractDir, outputDir, baseName);
+    console.log(`  [MinerU v4] 输出文件已保存: ${outputDir}/`);
   } catch (error) {
     console.error('  [MinerU v4] 保存输出文件失败:', error);
   }
@@ -864,6 +903,16 @@ export async function processPDF(
 
     // 题目识别
     const questions = extractQuestions(mdContent, structuredData);
+
+    // 将图片路径转换为 <uniqueBase>/images/xxx.jpg
+    //  确保多份 PDF 的同名图片（如 1.jpg）不会冲突，API 可按目录精确查找
+    //  兼容扁平（images/xxx.jpg）和嵌套（subdir/images/xxx.jpg）两种目录结构
+    for (const q of questions) {
+      q.content = q.content.replace(
+        /!\[([^\]]*)\]\((.+?\/)?images\/(.+?)\)/g,
+        (_, alt: string, _prefix: string, file: string) => `![${alt}](${uniqueBase}/images/${file})`,
+      );
+    }
 
     const elapsed = (Date.now() - startTime) / 1000;
     const pages = structuredData

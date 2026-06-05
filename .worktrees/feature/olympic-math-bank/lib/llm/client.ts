@@ -59,7 +59,7 @@ ${candidatesText}
 [{"tagName":"乘法原理","confidence":90,"reasoning":"分步计数"}]`;
 
   const response = await client.chat.completions.create({
-    model: 'deepseek-v4-pro',
+    model: process.env.LLM_MODEL || 'deepseek-v4-pro',
     messages: [
       { role: 'system', content: '你是小学数学竞赛教研专家，只从候选列表中选择标签，返回纯JSON。' },
       { role: 'user', content: prompt },

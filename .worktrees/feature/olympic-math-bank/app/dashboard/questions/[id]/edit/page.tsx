@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { QuestionForm } from '@/components/question/question-form';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, History, Save } from 'lucide-react';
 
 interface Question {
   id: string;
@@ -28,6 +28,9 @@ export default function EditQuestionPage() {
   const [question, setQuestion] = useState<Question | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const formDataRef = useRef<any>(null);
 
   useEffect(() => {
     fetch(`/api/questions/${params.id}`)
@@ -40,6 +43,40 @@ export default function EditQuestionPage() {
       });
   }, [params.id]);
 
+  // 清理自动保存定时器
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, []);
+
+  // 自动保存：表单数据变化后 5 秒静默存为草稿
+  const triggerAutoSave = useCallback((data: any) => {
+    formDataRef.current = data;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    setAutoSaveStatus('idle');
+
+    autoSaveTimerRef.current = setTimeout(async () => {
+      if (!formDataRef.current) return;
+      setAutoSaveStatus('saving');
+      try {
+        const response = await fetch(`/api/questions/${params.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formDataRef.current),
+        });
+        if (response.ok) {
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        } else {
+          setAutoSaveStatus('error');
+        }
+      } catch {
+        setAutoSaveStatus('error');
+      }
+    }, 5000);
+  }, [params.id]);
+
   const handleSubmit = async (data: any) => {
     setIsSubmitting(true);
     try {
@@ -50,7 +87,13 @@ export default function EditQuestionPage() {
       });
 
       if (response.ok) {
-        router.push('/dashboard/questions');
+        if (data.__stay) {
+          // "保存并继续编辑"：不跳转
+          setAutoSaveStatus('saved');
+          setTimeout(() => setAutoSaveStatus('idle'), 2000);
+        } else {
+          router.push('/dashboard/questions');
+        }
       } else {
         const error = await response.json();
         alert(error.error || '更新失败');
@@ -92,8 +135,19 @@ export default function EditQuestionPage() {
           </Link>
           <div>
             <h2 className="text-2xl font-bold text-foreground tracking-tight">编辑题目</h2>
-            <p className="text-sm text-muted-foreground">修改题目信息，系统自动保存历史版本</p>
+            <p className="text-sm text-muted-foreground">
+              修改题目信息，系统自动保存历史版本
+              {autoSaveStatus === 'saving' && <span className="ml-2 text-primary">● 自动保存中...</span>}
+              {autoSaveStatus === 'saved' && <span className="ml-2 text-success">✓ 已自动保存</span>}
+              {autoSaveStatus === 'error' && <span className="ml-2 text-error">✗ 自动保存失败</span>}
+            </p>
           </div>
+          <Link href={`/dashboard/questions/${question.id}/versions`}>
+            <Button variant="outline" size="sm" className="border-border hover:bg-muted rounded-xl">
+              <History className="w-4 h-4 mr-2" />
+              版本历史
+            </Button>
+          </Link>
         </div>
         {/* Form Container */}
         <div className="card-elevated p-6">
@@ -113,6 +167,7 @@ export default function EditQuestionPage() {
             }}
             onSubmit={handleSubmit}
             isSubmitting={isSubmitting}
+            onFormChange={triggerAutoSave}
           />
         </div>
       </div>

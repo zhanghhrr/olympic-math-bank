@@ -10,6 +10,13 @@ export function useImageUrl() {
       return `/api/${path}`;
     }
 
+    // 新格式: <baseName>/images/<filename> — OCR 导入时已嵌入唯一提取目录
+    // 转换为 /api/images/<baseName>/<filename>
+    const imageDirMatch = path.match(/^(.+?)\/images\/(.+)$/);
+    if (imageDirMatch) {
+      return `/api/images/${imageDirMatch[1]}/${imageDirMatch[2]}`;
+    }
+
     // 其他相对路径
     const prefix = path.startsWith('/') ? '' : '/';
     return `${prefix}${path}`;

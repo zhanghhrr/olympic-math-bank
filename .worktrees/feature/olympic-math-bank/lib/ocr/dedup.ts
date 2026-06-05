@@ -78,6 +78,7 @@ export async function checkDuplicates(
   content: string,
   excludeId?: string,
 ): Promise<DuplicateCheckResult> {
+  try {
   const fp = computeSimHash(content);
   if (fp === BigInt(0)) return { isDuplicate: false, similarity: 0 };
 
@@ -111,11 +112,16 @@ export async function checkDuplicates(
     similarity: Math.round(bestSimilarity * 100) / 100,
     existingQuestion: bestSimilarity >= SIMILARITY_THRESHOLD ? bestMatch : undefined,
   };
+  } catch (error) {
+    console.error('[Dedup] checkDuplicates 出错，降级为不重复:', error);
+    return { isDuplicate: false, similarity: 0 };
+  }
 }
 
 export async function batchCheckDuplicates(
   contents: string[],
 ): Promise<DuplicateCheckResult[]> {
+  try {
   const fingerprints = contents.map(c => computeSimHash(c));
 
   const allQuestions = await prisma.question.findMany({
@@ -126,7 +132,8 @@ export async function batchCheckDuplicates(
       source: true,
       createdAt: true,
     },
-    take: 1000,
+    orderBy: { createdAt: 'desc' },
+    take: 3000,
   });
 
   const questionFps = allQuestions.map(q => ({
@@ -156,4 +163,8 @@ export async function batchCheckDuplicates(
       existingQuestion: bestSimilarity >= SIMILARITY_THRESHOLD ? bestMatch : undefined,
     };
   });
+  } catch (error) {
+    console.error('[Dedup] batchCheckDuplicates 出错，降级为全部不重复:', error);
+    return contents.map(() => ({ isDuplicate: false, similarity: 0 }));
+  }
 }

@@ -76,10 +76,10 @@ function parseInlineImages(text: string): Array<{
 function renderLatexToHtml(text: string): string {
   if (!text) return text;
 
-  // 块级公式：$$...$$
+  // 行内公式：$$...$$
   text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
     try {
-      return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
+      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
     } catch {
       return `$$${latex}$$`;
     }
@@ -112,7 +112,8 @@ function renderLatexToHtml(text: string): string {
     }
   });
 
-  return text;
+  // 将换行符转为 <br>，确保行内公式之间的换行不被 HTML 空白折叠
+  return text.replace(/\n/g, '<br>');
 }
 
 interface InlineImageProps {

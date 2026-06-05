@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { VisualLatexEditor } from '@/components/VisualLatexEditor';
 import { Tags, X, Star } from 'lucide-react';
+import { normalizeQuestionType } from '@/lib/utils/question-type';
 
 interface QuestionFormProps {
   onSubmit: (data: any) => void;
@@ -21,6 +22,7 @@ interface QuestionFormProps {
     tagIds: string[];
     knowledgeTagIds: string[];
   }>;
+  onFormChange?: (data: any) => void;
 }
 
 interface Tag {
@@ -42,7 +44,7 @@ interface KnowledgeTag {
   children?: KnowledgeTag[];
 }
 
-export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFormProps) {
+export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange }: QuestionFormProps) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [knowledgeTree, setKnowledgeTree] = useState<KnowledgeTag[]>([]);
   const [selectedKnowledgeTags, setSelectedKnowledgeTags] = useState<string[]>([]);
@@ -53,12 +55,37 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
   const [selectedSubtopic, setSelectedSubtopic] = useState<string>('');
   const [selectedKnowledge, setSelectedKnowledge] = useState<string>('');
   const [selectedSkill, setSelectedSkill] = useState<string>('');
+  const [tagSearch, setTagSearch] = useState<string>('');
+  const [isDirty, setIsDirty] = useState(false);
+
+  // 最近使用的标签（localStorage）
+  const [recentTags, setRecentTags] = useState<Array<{ id: string; name: string; path: string }>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('recentTags');
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return [];
+  });
+
+  // 保存最近使用的标签到 localStorage
+  const saveRecentTags = (tags: Array<{ id: string; name: string; path: string }>) => {
+    setRecentTags(tags);
+    try { localStorage.setItem('recentTags', JSON.stringify(tags)); } catch {}
+  };
+
+  const addTagToRecent = (tag: { id: string; name: string; path: string }) => {
+    const filtered = recentTags.filter(t => t.id !== tag.id);
+    const updated = [tag, ...filtered].slice(0, 10); // 保留最近10个
+    saveRecentTags(updated);
+  };
 
   const [formData, setFormData] = useState({
     content: initialData?.content || '',
     answer: initialData?.answer || '',
     solution: initialData?.solution || '',
-    type: initialData?.type || 'SINGLE_CHOICE',
+    type: normalizeQuestionType(initialData?.type),
     grade: initialData?.grade || 'P3',
     difficulty: initialData?.difficulty || 3,
     source: initialData?.source || '',
@@ -78,6 +105,32 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
       .then(res => res.json())
       .then(data => setKnowledgeTree(data.tree || []));
   }, []);
+
+  // 脏状态检测：比较当前 formData 与 initialData
+  useEffect(() => {
+    if (!initialData) return;
+    const dirty =
+      formData.content !== (initialData.content || '') ||
+      formData.answer !== (initialData.answer || '') ||
+      formData.solution !== (initialData.solution || '') ||
+      formData.type !== normalizeQuestionType(initialData.type) ||
+      formData.grade !== (initialData.grade || 'P3') ||
+      formData.difficulty !== (initialData.difficulty || 3) ||
+      formData.source !== (initialData.source || '') ||
+      JSON.stringify(formData.tagIds) !== JSON.stringify(initialData.tagIds || []) ||
+      JSON.stringify(selectedKnowledgeTags) !== JSON.stringify(initialData.knowledgeTagIds || []);
+    setIsDirty(dirty);
+  }, [formData, selectedKnowledgeTags, initialData]);
+
+  // 离开确认：有未保存更改时提示用户
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isDirty]);
 
   // 初始化已选知识标签（编辑时从 initialData 加载）
   useEffect(() => {
@@ -132,11 +185,10 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
   ];
 
   const typeOptions = [
-    { value: 'SINGLE_CHOICE', label: '单选题' },
-    { value: 'MULTI_CHOICE', label: '多选题' },
+    { value: 'CHOICE', label: '选择题' },
     { value: 'FILL_BLANK', label: '填空题' },
     { value: 'SOLUTION', label: '解答题' },
-    { value: 'PROOF', label: '证明题' },
+    { value: 'CALCULATION', label: '计算题' },
   ];
 
   return (
@@ -258,7 +310,108 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
 
         {/* 五级知识标签选择 */}
         <div className="border border-border rounded-xl p-5 bg-white shadow-sm">
-          <label className="block text-sm font-medium text-foreground mb-3 flex items-center gap-2">
+          <label className="block text-sm font-medium text-foreground mb-3">
+            知识标签（五级）
+          </label>
+
+          {/* 最近使用的标签 */}
+          {recentTags.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-muted-foreground mb-1.5">最近使用：</p>
+              <div className="flex flex-wrap gap-1">
+                {recentTags.map(rt => (
+                  <button
+                    key={rt.id}
+                    type="button"
+                    className={`text-xs px-2 py-0.5 rounded-lg border transition-colors ${
+                      selectedKnowledgeTags.includes(rt.id)
+                        ? 'bg-primary/10 border-primary text-primary'
+                        : 'border-border hover:bg-muted text-muted-foreground'
+                    }`}
+                    onClick={() => {
+                      if (selectedKnowledgeTags.includes(rt.id)) {
+                        setSelectedKnowledgeTags(selectedKnowledgeTags.filter(id => id !== rt.id));
+                      } else {
+                        setSelectedKnowledgeTags([...selectedKnowledgeTags, rt.id]);
+                        addTagToRecent(rt);
+                      }
+                    }}
+                    title={rt.path}
+                  >
+                    {rt.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 搜索框：输入即过滤标签树，直接选择 */}
+          <div className="mb-3">
+            <input
+              type="text"
+              placeholder="搜索知识标签..."
+              value={tagSearch}
+              onChange={(e) => setTagSearch(e.target.value)}
+              className="input-field text-sm"
+            />
+            {tagSearch.trim() && (
+              <div className="mt-2 max-h-48 overflow-y-auto border border-border rounded-xl bg-surface p-2 space-y-1">
+                {(() => {
+                  const searchLower = tagSearch.toLowerCase();
+                  const results: { id: string; name: string; level: number; path: string }[] = [];
+
+                  const searchTree = (nodes: KnowledgeTag[], parents: string[] = []) => {
+                    for (const node of nodes) {
+                      const currentPath = [...parents, node.name];
+                      if (node.name.toLowerCase().includes(searchLower)) {
+                        results.push({
+                          id: node.id,
+                          name: node.name,
+                          level: node.level,
+                          path: currentPath.join(' > '),
+                        });
+                      }
+                      if (node.children) {
+                        searchTree(node.children, currentPath);
+                      }
+                    }
+                  };
+
+                  searchTree(knowledgeTree);
+                  
+                  if (results.length === 0) {
+                    return <p className="text-sm text-muted-foreground p-2 text-center">未找到匹配标签</p>;
+                  }
+
+                  return results.slice(0, 15).map(r => (
+                    <div
+                      key={r.id}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors ${
+                        selectedKnowledgeTags.includes(r.id)
+                          ? 'bg-primary/10 text-primary'
+                          : 'hover:bg-muted text-foreground'
+                      }`}
+                      onClick={() => {
+                        if (selectedKnowledgeTags.includes(r.id)) {
+                          setSelectedKnowledgeTags(selectedKnowledgeTags.filter(id => id !== r.id));
+                        } else {
+                          setSelectedKnowledgeTags([...selectedKnowledgeTags, r.id]);
+                          addTagToRecent({ id: r.id, name: r.name, path: r.path });
+                        }
+                      }}
+                    >
+                      <span className="badge badge-draft text-[10px]">L{r.level}</span>
+                      <span className="flex-1">{r.name}</span>
+                      <span className="text-muted-foreground text-xs truncate max-w-[200px]">{r.path}</span>
+                      {selectedKnowledgeTags.includes(r.id) && '✓'}
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* 级联选择器（传统方式） */}  <label className="block text-sm font-medium text-foreground mb-3 flex items-center gap-2">
             <Tags className="w-4 h-4" />
             知识标签（五级）
           </label>
@@ -482,12 +635,42 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData }: QuestionFo
       </div>
 
       <div className="flex gap-4 pt-4 border-t border-border">
-        <Button type="submit" disabled={isSubmitting} className="bg-primary hover:bg-primary-hover text-primary-foreground shadow-md hover:shadow-lg transition-all rounded-xl">
-          {isSubmitting ? '保存中...' : '保存题目'}
-        </Button>
-        <Button type="button" variant="outline" onClick={() => window.history.back()} className="border-border hover:bg-muted rounded-xl">
-          取消
-        </Button>
+        {isDirty && (
+          <span className="text-xs text-warning flex items-center gap-1 mr-auto self-center">
+            <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+            未保存的更改
+          </span>
+        )}
+          <Button type="submit" className="btn-primary">
+            保存并返回
+          </Button>
+          <Button 
+            type="button" 
+            className="btn-secondary"
+            onClick={() => {
+              if (!onSubmit) return;
+              const data: Record<string, unknown> = {
+                content: formData.content,
+                answer: formData.answer,
+                solution: formData.solution,
+                type: formData.type,
+                grade: formData.grade,
+                difficulty: formData.difficulty,
+                source: formData.source,
+                year: formData.year,
+                competition: formData.competition,
+                tagIds: formData.tagIds,
+                knowledgeTagIds: selectedKnowledgeTags,
+                __stay: true,
+              };
+              onSubmit(data as any);
+            }}
+          >
+            保存并继续编辑
+          </Button>
+          <Button type="button" variant="outline" onClick={() => window.history.back()} className="border-border hover:bg-muted rounded-xl">
+            取消
+          </Button>
       </div>
     </form>
   );

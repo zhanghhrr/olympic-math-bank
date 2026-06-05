@@ -79,7 +79,7 @@ export function calculateTagScore(
   tag: any,
   options?: { title?: string }
 ): number {
-  const allKeywords = buildSearchKeywords(tag);
+  const { ownKeywords, parentKeywords } = buildSearchKeywords(tag);
   const searchText = (options?.title ? options.title + ' ' : '') + content;
   const searchTextLower = searchText.toLowerCase();
   let score = 0;
@@ -114,7 +114,8 @@ export function calculateTagScore(
     }
   }
 
-  for (const keyword of allKeywords) {
+  // 评分：自身关键词权重 1.0，父级关键词权重 0.3
+  for (const keyword of ownKeywords) {
     const keywordLower = keyword.toLowerCase();
     if (!keywordLower) continue;
 
@@ -149,14 +150,42 @@ export function calculateTagScore(
     }
   }
 
+  // 父级关键词：权重 0.3（向上取整，最小 0）
+  const PARENT_WEIGHT = 0.3;
+  for (const keyword of parentKeywords) {
+    const keywordLower = keyword.toLowerCase();
+    if (!keywordLower) continue;
+
+    if (searchTextLower.includes(keywordLower)) {
+      score += Math.round(1 * PARENT_WEIGHT);
+    }
+
+    try {
+      const escaped = keywordLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (/[\u4e00-\u9fff\u3400-\u4dbf]/.test(keywordLower)) {
+        const cjkBoundary = `(?:^|\\s|[，。！？；：""''（）【】《》\\-+×÷=*\\/\\(\\)（）])${escaped}(?:$|\\s|[，。！？；：""''（）【】《》\\-+×÷=*\\/\\(\\)（）])`;
+        if (new RegExp(cjkBoundary, 'i').test(searchText)) {
+          score += Math.round(2 * PARENT_WEIGHT);
+        }
+      } else {
+        if (new RegExp(`\\b${escaped}\\b`, 'i').test(searchTextLower)) {
+          score += Math.round(2 * PARENT_WEIGHT);
+        }
+      }
+    } catch (_e) {
+      /* skip invalid regex */
+    }
+  }
+
   return score;
 }
 
-function buildSearchKeywords(tag: any): string[] {
+function buildSearchKeywords(tag: any): { ownKeywords: string[]; parentKeywords: string[] } {
   const parentNames = getParentNames(tag);
   const explicitKeywords = knowledgeKeywords[tag.name] || [];
-  const allKeywords = [...new Set([tag.name, ...parentNames, ...explicitKeywords])];
-  return allKeywords.filter(kw => !isSingleCJK(kw));
+  const ownKeywords = [...new Set([tag.name, ...explicitKeywords])].filter(kw => !isSingleCJK(kw));
+  const parentKeywords = [...new Set(parentNames)].filter(kw => !isSingleCJK(kw)).filter(kw => !ownKeywords.includes(kw));
+  return { ownKeywords, parentKeywords };
 }
 
 function deduplicateByBranch(matches: TagMatchResult[], maxTop: number): TagMatchResult[] {

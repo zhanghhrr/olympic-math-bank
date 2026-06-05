@@ -8,7 +8,7 @@ import { LatexToolbar } from './LatexToolbar';
 
 type Segment =
   | { type: 'text'; content: string }
-  | { type: 'latex'; content: string; displayMode: boolean }
+  | { type: 'latex'; content: string; displayMode: boolean; delimiter: '$' | '$$' }
   | { type: 'image'; url: string; alt: string; width: number; height: number; aspectRatio: number; align: 'left' | 'center' | 'right' }
   | { type: 'align'; align: 'left' | 'center' | 'right'; content: string };
 
@@ -139,13 +139,13 @@ function parseMarkdownToSegments(markdown: string): Segment[] {
 function parseTextAndLatex(text: string, segments: Segment[]) {
   if (!text) return;
 
-  // 匹配 $$...$$ display math
+  // 匹配 $$...$$ inline math
   const displayRegex = /\$\$[\s\S]*?\$\$/g;
   // 匹配 $...$ inline math（但不是 $$）
   const inlineRegex = /(?<!\$)\$(?!\$)[^$\n]+?\$(?!\$)/g;
 
   // 找到所有 LaTeX 位置
-  const latexRanges: { start: number; end: number; content: string; displayMode: boolean }[] = [];
+  const latexRanges: { start: number; end: number; content: string; displayMode: boolean; delimiter: '$' | '$$' }[] = [];
 
   let match;
   while ((match = displayRegex.exec(text)) !== null) {
@@ -153,7 +153,8 @@ function parseTextAndLatex(text: string, segments: Segment[]) {
       start: match.index,
       end: match.index + match[0].length,
       content: match[0].slice(2, -2),
-      displayMode: true,
+      displayMode: false,
+      delimiter: '$$' as const,
     });
   }
 
@@ -170,6 +171,7 @@ function parseTextAndLatex(text: string, segments: Segment[]) {
         end: match.index + match[0].length,
         content: match[0].slice(1, -1),
         displayMode: false,
+        delimiter: '$' as const,
       });
     }
   }
@@ -177,23 +179,23 @@ function parseTextAndLatex(text: string, segments: Segment[]) {
   // 按位置排序
   latexRanges.sort((a, b) => a.start - b.start);
 
-  // 提取文本片段
+  // 提取文本片段（保留换行符，确保公式之间不粘连）
   let lastEnd = 0;
   for (const range of latexRanges) {
     if (range.start > lastEnd) {
       const textContent = text.slice(lastEnd, range.start);
-      if (textContent.trim()) {
+      if (textContent.length > 0) {
         segments.push({ type: 'text', content: textContent });
       }
     }
-    segments.push({ type: 'latex', content: range.content, displayMode: range.displayMode });
+    segments.push({ type: 'latex', content: range.content, displayMode: range.displayMode, delimiter: range.delimiter });
     lastEnd = range.end;
   }
 
   // 最后剩余的文本
   if (lastEnd < text.length) {
     const remaining = text.slice(lastEnd);
-    if (remaining.trim()) {
+    if (remaining.length > 0) {
       segments.push({ type: 'text', content: remaining });
     }
   }
@@ -206,7 +208,7 @@ function segmentsToMarkdown(segments: Segment[]): string {
       case 'text':
         return seg.content;
       case 'latex':
-        return seg.displayMode ? `$$${seg.content}$$` : `$${seg.content}$`;
+        return seg.delimiter === '$$' ? `$$${seg.content}$$` : `$${seg.content}$`;
       case 'image':
         const hasSize = seg.width > 0 && seg.height > 0;
         return hasSize
@@ -247,16 +249,16 @@ function renderEditHtml(segments: Segment[], baseUrl: string): string {
         return seg.content.replace(/\n/g, '<br>');
       case 'latex':
         // 编辑模式下 LaTeX 显示为纯文本源码
-        const latexText = seg.displayMode ? `$$${seg.content}$$` : `$${seg.content}$`;
+        const latexText = seg.delimiter === '$$' ? `$$${seg.content}$$` : `$${seg.content}$`;
         const latexStyle = seg.displayMode
           ? 'display:block;font-family:monospace;background:#f3f4f6;padding:4px 8px;border-radius:4px;color:#7c3aed;margin:8px 0;white-space:pre-wrap;'
           : 'font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;white-space:pre-wrap;';
-        return `${needLeadingBreak ? '<br>' : ''}<span class="latex-source" data-latex="${seg.content}" data-mode="${seg.displayMode ? 'display' : 'inline'}" style="${latexStyle}">${latexText}</span>${needTrailingBreak ? '<br>' : ''}`;
+        return `${needLeadingBreak ? '<br>' : ''}<span class="latex-source" data-latex="${seg.content}" data-mode="${seg.displayMode ? 'display' : 'inline'}" data-delimiter="${seg.delimiter}" style="${latexStyle}">${latexText}</span>${needTrailingBreak ? '<br>' : ''}`;
       case 'image':
         const imgUrl = getImageUrl(seg.url, baseUrl);
         const alignStyle = seg.align === 'center' ? 'margin: 8px auto; display: block;' :
                           seg.align === 'right' ? 'margin: 8px 0 8px auto; display: block;' : 'margin: 8px 0; display: block;';
-        return `${needLeadingBreak ? '<br>' : ''}<span class="image-wrapper" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="position:relative;${alignStyle}width:${seg.width}px;height:${seg.height}px;"><img src="${imgUrl}" alt="${seg.alt}" style="width:100%;height:100%;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" /><span class="resize-handle" contentEditable="false" style="position:absolute;bottom:0;right:0;width:24px;height:24px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;z-index:10;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>${needTrailingBreak ? '<br>' : ''}`;
+        return `${needLeadingBreak ? '<br>' : ''}<span class="image-wrapper" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="position:relative;${alignStyle}width:${seg.width}px;height:${seg.height}px;"><img src="${imgUrl}" alt="${seg.alt}" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="width:100%;height:100%;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" /><span class="resize-handle" contentEditable="false" style="position:absolute;bottom:0;right:0;width:24px;height:24px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;z-index:10;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>${needTrailingBreak ? '<br>' : ''}`;
       case 'align':
         // 编辑模式下对齐块显示为可视化可编辑区域，带边框和背景标识
         const alignTextStyleMap: Record<string, string> = {
@@ -292,14 +294,14 @@ function renderInnerHtml(content: string, baseUrl: string): string {
       case 'text':
         return seg.content.replace(/\n/g, '<br>');
       case 'latex':
-        const latexText = seg.displayMode ? `$$${seg.content}$$` : `$${seg.content}$`;
+        const latexText = seg.delimiter === '$$' ? `$$${seg.content}$$` : `$${seg.content}$`;
         const latexStyle = seg.displayMode
           ? 'display:block;font-family:monospace;background:#f3f4f6;padding:4px 8px;border-radius:4px;color:#7c3aed;margin:4px 0;white-space:pre-wrap;'
           : 'font-family:monospace;background:#f3f4f6;padding:0 4px;border-radius:2px;color:#7c3aed;white-space:pre-wrap;';
-        return `<span class="latex-source" data-latex="${seg.content}" data-mode="${seg.displayMode ? 'display' : 'inline'}" style="${latexStyle}">${latexText}</span>`;
+        return `<span class="latex-source" data-latex="${seg.content}" data-mode="${seg.displayMode ? 'display' : 'inline'}" data-delimiter="${seg.delimiter}" style="${latexStyle}">${latexText}</span>`;
       case 'image':
         const imgUrl = getImageUrl(seg.url, baseUrl);
-        return `<span class="image-wrapper" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="position:relative;display:inline-block;margin:4px;"><img src="${imgUrl}" alt="${seg.alt}" style="width:${seg.width}px;height:${seg.height}px;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" /><span class="resize-handle" contentEditable="false" style="position:absolute;bottom:0;right:0;width:20px;height:20px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;z-index:10;"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>`;
+        return `<span class="image-wrapper" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="position:relative;display:inline-block;margin:4px;"><img src="${imgUrl}" alt="${seg.alt}" data-url="${seg.url}" data-alt="${seg.alt}" data-width="${seg.width}" data-height="${seg.height}" data-align="${seg.align}" style="width:${seg.width}px;height:${seg.height}px;object-fit:contain;border:1px solid #e5e7eb;border-radius:4px;" /><span class="resize-handle" contentEditable="false" style="position:absolute;bottom:0;right:0;width:20px;height:20px;background:rgba(59,130,246,0.9);border-radius:4px 0 0 0;cursor:nwse-resize;display:flex;align-items:center;justify-content:center;z-index:10;"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 3 3 3 3 9"/><polyline points="15 21 21 21 21 15"/><line x1="3" y1="9" x2="10" y2="16"/><line x1="21" y1="15" x2="14" y2="8"/></svg></span></span>`;
       default:
         return seg.content;
     }
@@ -471,20 +473,24 @@ export function VisualLatexEditor({
         const storedLatex = el.getAttribute('data-latex') || '';
         const mode = el.getAttribute('data-mode') || 'inline';
         const isDisplay = mode === 'display';
+        const storedDelimiter = (el.getAttribute('data-delimiter') || '$') as '$' | '$$';
         const displayText = el.textContent || '';
         const displayTrimmed = displayText.replace(/^\$\$|\$\$$/g, '');
         let latexContent = storedLatex;
+        let delimiter: '$' | '$$' = storedDelimiter;
 
         if (displayTrimmed !== storedLatex) {
           if (displayText.startsWith('$$') && displayText.endsWith('$$')) {
             latexContent = displayText.slice(2, -2);
+            delimiter = '$$';
           } else if (displayText.startsWith('$') && displayText.endsWith('$')) {
             latexContent = displayText.slice(1, -1);
+            delimiter = '$';
           }
         }
 
         if (latexContent.trim()) {
-          segments.push({ type: 'latex', content: latexContent, displayMode: isDisplay });
+          segments.push({ type: 'latex', content: latexContent, displayMode: isDisplay, delimiter });
         }
       } else if (el.classList.contains('image-wrapper')) {
         const url = el.getAttribute('data-url') || '';
@@ -506,7 +512,19 @@ export function VisualLatexEditor({
         // 块级元素后添加换行
         segments.push({ type: 'text', content: '\n' });
       } else {
-        // 递归处理其他元素
+        // 兜底：处理被 contentEditable 解包的原始 <img> 标签
+        if (el.tagName === 'IMG') {
+          const imgEl = el as HTMLImageElement;
+          const url = imgEl.getAttribute('data-url') || imgEl.src || '';
+          const alt = imgEl.alt || '';
+          const width = parseInt(imgEl.getAttribute('data-width') || String(imgEl.width) || '200');
+          const height = parseInt(imgEl.getAttribute('data-height') || String(imgEl.height) || '150');
+          const align = (imgEl.getAttribute('data-align') || 'center') as 'left' | 'center' | 'right';
+          const cleanUrl = url.replace(/^https?:\/\/[^\/]+\/api\/images\//, '').replace(/^https?:\/\/[^\/]+\//, '');
+          segments.push({ type: 'image', url: cleanUrl || url, alt, width, height, aspectRatio: height / width, align });
+          return;
+        }
+        // 递归处理子节点
         el.childNodes.forEach((child: Node) => processNodeForAlign(child, segments));
       }
     }
@@ -534,24 +552,28 @@ export function VisualLatexEditor({
           const storedLatex = el.getAttribute('data-latex') || '';
           const mode = el.getAttribute('data-mode') || 'inline';
           const isDisplay = mode === 'display';
+          const storedDelimiter = (el.getAttribute('data-delimiter') || '$') as '$' | '$$';
           // 获取显示的文本内容
           const displayText = el.textContent || '';
           // 判断显示内容是否被用户编辑过（与 data-latex 不一致）
           // 显示内容的格式是 $content$ 或 $$content$$
           const displayTrimmed = displayText.replace(/^\$\$|\$\$$/g, '');
           let latexContent = storedLatex;
+          let delimiter: '$' | '$$' = storedDelimiter;
 
           if (displayTrimmed !== storedLatex) {
             // 用户编辑了 LaTeX 内容，使用显示内容去掉 $ 后的值
             if (displayText.startsWith('$$') && displayText.endsWith('$$')) {
               latexContent = displayText.slice(2, -2);
+              delimiter = '$$';
             } else if (displayText.startsWith('$') && displayText.endsWith('$')) {
               latexContent = displayText.slice(1, -1);
+              delimiter = '$';
             }
           }
 
           if (latexContent.trim()) {
-            segments.push({ type: 'latex', content: latexContent, displayMode: isDisplay });
+            segments.push({ type: 'latex', content: latexContent, displayMode: isDisplay, delimiter });
           }
         } else if (el.classList.contains('image-wrapper')) {
           const url = el.getAttribute('data-url') || '';
@@ -614,6 +636,18 @@ export function VisualLatexEditor({
           // 块级元素后加换行
           segments.push({ type: 'text', content: '\n' });
         } else {
+          // 兜底：处理被 contentEditable 解包的原始 <img> 标签
+          if (el.tagName === 'IMG') {
+            const imgEl = el as HTMLImageElement;
+            const url = imgEl.getAttribute('data-url') || imgEl.src || '';
+            const alt = imgEl.alt || '';
+            const width = parseInt(imgEl.getAttribute('data-width') || String(imgEl.width) || '200');
+            const height = parseInt(imgEl.getAttribute('data-height') || String(imgEl.height) || '150');
+            const align = (imgEl.getAttribute('data-align') || 'center') as 'left' | 'center' | 'right';
+            const cleanUrl = url.replace(/^https?:\/\/[^\/]+\/api\/images\//, '').replace(/^https?:\/\/[^\/]+\//, '');
+            segments.push({ type: 'image', url: cleanUrl || url, alt, width, height, aspectRatio: height / width, align });
+            return;
+          }
           // 递归处理其他元素
           el.childNodes.forEach(processNode);
         }
@@ -800,6 +834,32 @@ export function VisualLatexEditor({
         <>
           <div data-latex-toolbar>
             <LatexToolbar onInsert={handleInsert} onLatexInsert={handleLatexInsert} showImageButton />
+          {/* 常用 LaTeX 模板快捷插入 */}
+          <div className="border-b px-3 py-1.5 bg-muted/30 flex flex-wrap gap-1 items-center">
+            <span className="text-[10px] text-muted-foreground mr-1">模板:</span>
+            {[
+              { label: '分数', latex: '\\frac{}{}', insert: '\\frac{a}{b}' },
+              { label: '根号', latex: '\\sqrt{}', insert: '\\sqrt{x}' },
+              { label: '乘号', latex: '\\times', insert: '\\times' },
+              { label: '除号', latex: '\\div', insert: '\\div' },
+              { label: '下标', latex: '_{}', insert: 'a_{1}' },
+              { label: '上标', latex: '^{}', insert: 'x^{2}' },
+              { label: '角', latex: '\\angle', insert: '\\angle ABC' },
+              { label: '求和', latex: '\\sum', insert: '\\sum_{i=1}^{n}' },
+              { label: '约分', latex: '\\cancel', insert: '\\cancel{分子}' },
+              { label: '矩阵', latex: '\\begin{matrix}', insert: '\\begin{matrix} a & b \\\\ c & d \\end{matrix}' },
+            ].map(tpl => (
+              <button
+                key={tpl.label}
+                type="button"
+                className="px-1.5 py-0.5 text-[10px] rounded bg-white border border-border hover:bg-accent/10 transition-colors text-muted-foreground hover:text-foreground"
+                onClick={() => handleInsert(tpl.insert)}
+                title={tpl.latex}
+              >
+                \( {tpl.latex} \)
+              </button>
+            ))}
+          </div>
           </div>
           <div
             ref={editorRef}

@@ -1,26 +1,31 @@
 /**
  * OCR 结果导入数据库脚本
  * 用法: npx tsx scripts/import-ocr-to-db.ts <ocr_result.json> [options]
+ *
+ * 底层复用 lib/ocr/import-to-db.ts 的 smartImportFromOCR()，
+ * 确保公式校验、自动打标签、题号剥离等逻辑与 API 导入路径一致。
  */
 
-import { PrismaClient } from '@prisma/client';
 import fs from 'fs/promises';
 import path from 'path';
+import { smartImportFromOCR } from '../lib/ocr/import-to-db';
+import type { ParsedQuestion } from '../lib/ocr/mineru-client';
 
-const prisma = new PrismaClient();
-
-interface OCRResult {
+interface OCRResultItem {
   success: boolean;
   parsed?: {
     title?: string;
     content: string;
-    options: string[];
+    options?: string[];
     answer?: string;
+    analysis?: string;
     solution?: string;
-    type: string;
-    formulas?: string[];
+    type?: string;
+    formulas?: string;
+    sourceBlocks?: string;
   };
   page?: number;
+  questionNumber?: number;
   raw?: any;
 }
 
@@ -40,7 +45,7 @@ async function importOCRToDB(
   const data = JSON.parse(content);
 
   // 提取结果
-  let results: OCRResult[] = [];
+  let results: OCRResultItem[] = [];
   if (data.results && Array.isArray(data.results)) {
     results = data.results;
   } else if (Array.isArray(data)) {
@@ -49,79 +54,65 @@ async function importOCRToDB(
     results = [data];
   }
 
-  console.log(`📊 共 ${results.length} 页识别结果`);
+  console.log(`📊 共 ${results.length} 条识别结果`);
 
-  let imported = 0;
-  let failed = 0;
-
-  for (const result of results) {
-    if (!result.success || !result.parsed) {
-      console.log(`⚠️ 跳过第 ${result.page || '?'} 页: 识别失败`);
-      failed++;
-      continue;
-    }
-
-    const parsed = result.parsed;
-
-    // 检查内容有效性
-    if (!parsed.content || parsed.content.length < 10) {
-      console.log(`⚠️ 跳过第 ${result.page || '?'} 页: 内容过短`);
-      failed++;
-      continue;
-    }
-
-    // 确定题目类型
-    const questionType = parsed.options.length > 0 ? 'SINGLE_CHOICE' : 'SOLUTION';
-
-    // 处理选项
-    let optionsJson: string | undefined;
-    if (parsed.options.length > 0) {
-      const optionsMap: Record<string, string> = {};
-      parsed.options.forEach((opt: string, index: number) => {
-        const label = String.fromCharCode(65 + index);
-        const content = opt.replace(/^[A-F][\.、\s]*/, '').trim();
-        optionsMap[label] = content;
-      });
-      optionsJson = JSON.stringify(optionsMap);
-    }
-
-    try {
-      if (!options.dryRun) {
-        // 创建题目
-        const question = await prisma.question.create({
-          data: {
-            content: parsed.content,
-            answer: parsed.answer || '',
-            solution: parsed.solution || null,
-            type: questionType as any,
-            options: optionsJson,
-            grade: (options.grade || 'P3') as any,
-            difficulty: 3,
-            source: options.source || `OCR导入-第${result.page || '?'}页`,
-            status: 'PENDING',
-            createdById: options.userId,
-          }
-        });
-
-        console.log(`✅ 第 ${result.page || '?'} 页导入成功: ${question.id}`);
-        imported++;
-      } else {
-        console.log(`📝 [预览] 第 ${result.page || '?'} 页: ${parsed.content.substring(0, 50)}...`);
-        imported++;
+  if (options.dryRun) {
+    console.log('📝 [预览模式] 不实际导入数据库\n');
+    for (const result of results) {
+      if (!result.success || !result.parsed) {
+        console.log(`⚠️  跳过第 ${result.page || '?'} 页: 识别失败`);
+        continue;
       }
-    } catch (error: any) {
-      console.error(`❌ 第 ${result.page || '?'} 页导入失败:`, error.message);
-      failed++;
+      const p = result.parsed;
+      if (!p.content || p.content.length < 10) {
+        console.log(`⚠️  跳过第 ${result.page || '?'} 页: 内容过短`);
+        continue;
+      }
+      console.log(`📝 第 ${result.page || '?'} 页: ${p.content.substring(0, 80)}...`);
     }
+    console.log(`\n预览完成: ${results.length} 条记录`);
+    return;
   }
 
-  console.log('\n📈 导入结果:');
-  console.log(`  - 成功: ${imported}`);
-  console.log(`  - 失败: ${failed}`);
-  console.log(`  - 总计: ${results.length}`);
+  // 使用统一的 smartImportFromOCR 导入（含公式校验、自动打标签、题号剥离）
+  const parsedQuestions = results.map((r) => {
+    const p = r.parsed;
+    if (!r.success || !p) {
+      return {
+        success: false as const,
+        error: 'OCR识别失败',
+        page: r.page,
+        questionNumber: r.questionNumber,
+      };
+    }
+    return {
+      success: true as const,
+      parsed: {
+        title: p.title,
+        content: p.content,
+        answer: p.answer || p.solution || '',
+        analysis: p.analysis || '',
+        formulas: p.formulas || null,
+        sourceBlocks: p.sourceBlocks || null,
+      } as ParsedQuestion,
+      page: r.page,
+      questionNumber: r.questionNumber,
+    };
+  });
 
-  if (!options.dryRun) {
-    console.log('\n💡 提示: 导入的题目状态为"待审核",请前往审核页面进行审核');
+  const result = await smartImportFromOCR(parsedQuestions, options.userId, {
+    grade: (options.grade as any) || 'P3',
+    source: options.source || path.basename(filePath),
+    autoMatchTags: true,
+  });
+
+  console.log('\n📈 导入结果:');
+  console.log(`  - 成功: ${result.success}`);
+  console.log(`  - 失败: ${result.failed}`);
+  console.log(`  - 总计: ${result.total}`);
+
+  if (result.success > 0) {
+    console.log('\n💡 提示: 导入的题目状态为"草稿", 可在题库管理页面查看');
   }
 }
 
@@ -177,8 +168,6 @@ async function main() {
   } catch (error: any) {
     console.error('导入失败:', error.message);
     process.exit(1);
-  } finally {
-    await prisma.$disconnect();
   }
 }
 

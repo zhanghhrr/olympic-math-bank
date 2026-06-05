@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
 
 // 获取知识标签列表
 export async function GET(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { searchParams } = new URL(request.url);
     const level = searchParams.get('level');
     const module = searchParams.get('module');
@@ -51,6 +57,10 @@ export async function GET(request: NextRequest) {
 // 获取所有模块列表
 export async function POST(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const modules = await prisma.knowledgeTag.findMany({
       where: { level: 1 },
       orderBy: { order: 'asc' }

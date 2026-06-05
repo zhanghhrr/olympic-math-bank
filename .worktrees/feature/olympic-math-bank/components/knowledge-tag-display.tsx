@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { getTagPathDash, getTagHierarchy } from '@/lib/ocr/knowledge-keywords';
 
 interface KnowledgeTag {
   id: string;
@@ -34,32 +35,6 @@ interface KnowledgeTagDisplayProps {
   }>;
   showPath?: boolean;
   compact?: boolean;
-}
-
-/**
- * 获取标签的层级结构
- */
-function getTagHierarchy(tag: any): TagHierarchy {
-  return {
-    level1: tag.parent?.parent?.parent?.parent?.name,
-    level2: tag.parent?.parent?.parent?.name,
-    level3: tag.parent?.parent?.name,
-    level4: tag.parent?.name,
-    level5: tag.name,
-  };
-}
-
-/**
- * 获取标签的完整路径
- */
-function getTagPath(tag: any): string {
-  const parts: string[] = [];
-  if (tag.parent?.parent?.parent?.parent) parts.push(tag.parent.parent.parent.parent.name);
-  if (tag.parent?.parent?.parent) parts.push(tag.parent.parent.parent.name);
-  if (tag.parent?.parent) parts.push(tag.parent.parent.name);
-  if (tag.parent) parts.push(tag.parent.name);
-  parts.push(tag.name);
-  return parts.join(' > ');
 }
 
 /**
@@ -111,7 +86,7 @@ export function KnowledgeTagDisplay({ tags, showPath = true, compact = false }: 
             <span
               key={tag.id}
               className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${colorClass}`}
-              title={getTagPath(tag)}
+              title={getTagPathDash(tag)}
             >
               {icon} {tag.name}
             </span>
@@ -248,7 +223,7 @@ export function KnowledgeTagBadge({ tag }: { tag: any }) {
   return (
     <span
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${colorClass}`}
-      title={getTagPath(tag)}
+      title={getTagPathDash(tag)}
     >
       {icon}
       <span className="max-w-[100px] truncate">{tag.name}</span>

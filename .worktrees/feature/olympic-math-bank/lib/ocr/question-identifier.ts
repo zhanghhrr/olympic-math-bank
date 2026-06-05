@@ -188,6 +188,7 @@ export class HybridQuestionIdentifier {
 
   /**
    * 检测内容是否像是一个题目列表
+   * 改进：答案/解析区域内的编号行不参与计数，防止教师版解析子步骤被误判为独立题目
    */
   private isLikelyQuestionList(content: string, blockType: string = 'unknown'): boolean {
     const lines = content.split('\n');
@@ -195,15 +196,33 @@ export class HybridQuestionIdentifier {
     let ansMarkerCount = 0;
     const stylesFound = new Set<string>();
 
-    for (const line of lines) {
-      const lineStripped = line.trim();
+    // 找到第一个答案/解析标记的位置，之后的内容为"答案区"
+    let answerZoneStart = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (this.hasAnswerKeyword(lines[i])) {
+        answerZoneStart = i;
+        // 只统计第一个答案标记（题干区），答案区内的标记不参与计数
+        ansMarkerCount = 1;
+        break;
+      }
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineStripped = lines[i].trim();
+
+      // 答案区内的编号行不参与计数（这些是解析子步骤）
+      if (answerZoneStart >= 0 && i > answerZoneStart) {
+        // 答案区内仍检测答案标记（用于判断是否为多题列表）
+        if (this.hasAnswerKeyword(lineStripped)) {
+          ansMarkerCount++;
+        }
+        continue;
+      }
+
       const match = this.listPattern.exec(lineStripped);
       if (match) {
         numStartCount++;
         stylesFound.add(this.getNumberingType(match[1]));
-      }
-      if (this.hasAnswerKeyword(line)) {
-        ansMarkerCount++;
       }
     }
 
@@ -377,6 +396,7 @@ export class HybridQuestionIdentifier {
       content: string[];
       header: string;
     } = { type: 'unknown', content: [], header: '' };
+    let lastQuestionNumber = 0; // 追踪最后一个已确认的题号，用于连续性判断
 
     for (const line of lines) {
       const lineStripped = line.trim();
@@ -385,29 +405,10 @@ export class HybridQuestionIdentifier {
       if (headerMatch) {
         const headerText = headerMatch[2];
 
-        // 如果标题是章节大标题（如 "(三) 大数计算"），直接标记为 ignore
-        if (this.isSectionHeader(headerText)) {
-          // 保存旧块
-          if (currentBlock.content.length > 0) {
-            const contentStr = currentBlock.content.join('\n').trim();
-            if (contentStr) {
-              blocks.push({
-                type: currentBlock.type as any,
-                content: contentStr,
-                header: currentBlock.header,
-                hasAnswer: false,
-                hasImage: false
-              });
-            }
-          }
-          // 开始新的 ignore 块
-          currentBlock = {
-            type: 'ignore',
-            content: [line],
-            header: headerText
-          };
-          continue;
-        }
+        // 如果标题是章节大标题（如 "## 一、奇偶性"），
+        // 不应标记为 ignore，因为其下包含多道题目。
+        // 改为通过 isQuestionHeader 正常分类，由 isLikelyQuestionList 兜底转为 list_container。
+        const isSection = this.isSectionHeader(headerText);
 
         // 如果标题包含答案关键词，且当前正在处理题目，则认为该标题是题目的一部分
         if (this.hasAnswerKeyword(headerText) &&
@@ -430,6 +431,10 @@ export class HybridQuestionIdentifier {
               }
             }
 
+            if (currentBlock.type === 'single_question' || currentBlock.type === 'list_container') {
+              lastQuestionNumber = this.updateLastQuestionNumber(contentStr, lastQuestionNumber);
+            }
+
             blocks.push({
               type: currentBlock.type as any,
               content: contentStr,
@@ -442,7 +447,10 @@ export class HybridQuestionIdentifier {
 
         // 开始新块
         let blockType = 'unknown';
-        if (this.isQuestionHeader(headerText)) {
+        if (isSection) {
+          // 章节标题（如 "一、奇偶性"）下方包含多道题目，直接归类为列表容器
+          blockType = 'list_container';
+        } else if (this.isQuestionHeader(headerText)) {
           if (['练习', '真题', '测试', '进门考', '挑战'].some(k => headerText.includes(k))) {
             blockType = 'list_container';
           } else {
@@ -469,13 +477,43 @@ export class HybridQuestionIdentifier {
         };
       } else {
         const isNumStart = this.numberPattern.test(lineStripped);
+        // 仅将「数字+点号」视为主题目分界，避免数据行（如 14052、）被误判
+        const isMainQuestionNum = /^\s*(?:[-–—]\s*)?\d+[\.．]/.test(lineStripped);
         const curContent = currentBlock.content.join('\n');
         const hasAns = this.hasAnswerKeyword(curContent);
 
-        if (isNumStart && hasAns && currentBlock.content.length > 0 &&
+        if (isMainQuestionNum && hasAns && currentBlock.content.length > 0 &&
             currentBlock.type !== 'ignore') {
+          // 利用题号连续性判断是否为真正的下一题：
+          // - 题号 = 当前块题号 + 1：连续，很大概率是新题目
+          // - 题号 = 1：重启编号，大概率是答案子步骤
+          // - 其他情况：用 isAnswerSubStepLine 兜底
+          const currentNum = this.extractQuestionNumber(lineStripped);
+          // 使用当前块内题号作为参考（比 lastQuestionNumber 更准确，因为当前块可能尚未 flush）
+          const currentBlockNum = this.extractQuestionNumber(currentBlock.content[0] || '');
+          const effectiveLastNumber = currentBlockNum > 0 ? currentBlockNum : lastQuestionNumber;
+          const isConsecutive = currentNum > 0 && currentNum === effectiveLastNumber + 1;
+          const isRestart = currentNum === 1 && effectiveLastNumber > 0;
+          
+          if (isConsecutive) {
+            // 题号连续 → 确认为新题目，正常拆分
+          } else if (isRestart) {
+            // 答案区内的重启编号 → 子步骤，不拆分
+            currentBlock.content.push(line);
+            continue;
+          } else {
+            // 非连续非重启 → 用原有启发式检查
+            const isSubStep = this.isAnswerSubStepLine(lineStripped, curContent);
+            if (isSubStep) {
+              currentBlock.content.push(line);
+              continue;
+            }
+          }
           const contentStr = curContent.trim();
           if (contentStr) {
+            // 提取当前块的题号，更新 lastQuestionNumber
+            const blockNum = this.extractQuestionNumber(currentBlock.content[0] || '');
+            if (blockNum > 0) lastQuestionNumber = blockNum;
             blocks.push({
               type: currentBlock.type as any,
               content: contentStr,
@@ -499,6 +537,9 @@ export class HybridQuestionIdentifier {
     if (currentBlock.content.length > 0) {
       const contentStr = currentBlock.content.join('\n').trim();
       if (contentStr) {
+        if (currentBlock.type === 'single_question' || currentBlock.type === 'list_container') {
+          lastQuestionNumber = this.updateLastQuestionNumber(contentStr, lastQuestionNumber);
+        }
         blocks.push({
           type: currentBlock.type as any,
           content: contentStr,
@@ -517,8 +558,85 @@ export class HybridQuestionIdentifier {
   }
 
   /**
-   * 判断序号类型
+   * 判断当前编号行是否是答案/解析区域内的子步骤（不应作为新题目拆分）
+   * 教师版 PDF 中，解析部分常包含编号子步骤，如：
+   *   【解析】
+   *   1. 先计算...
+   *   2. 再计算...
+   *   3. 最终得出...
+   * 这些子步骤的编号不应被误判为新题目的开始。
    */
+  private isAnswerSubStepLine(currentLine: string, blockContent: string): boolean {
+    // 获取答案/解析标记之后的内容
+    const ansMarkerPos = this.findLastAnswerMarkerPos(blockContent);
+    if (ansMarkerPos < 0) return false;
+
+    const afterAnswer = blockContent.substring(ansMarkerPos);
+
+    // 条件1：答案/解析区已包含编号子步骤（说明当前块正在列举步骤）
+    const subStepCount = (afterAnswer.match(/\n\s*(?:\d+[\.．、]|[(（]\s*\d+\s*[)）])/g) || []).length;
+    if (subStepCount >= 0) {
+      // 当前行编号较小（≤5），且内容不包含新题目的典型特征
+      const numMatch = currentLine.match(/^\s*(?:[-–—]\s*)?(\d+)[\.．、]/);
+      if (numMatch) {
+        const num = parseInt(numMatch[1]);
+        // 编号为 1-5 的且不包含题目关键词的，大概率是子步骤
+        if (num <= 5 && !this.hasQuestionContentSignals(currentLine)) {
+          return true;
+        }
+      }
+    }
+
+    // 条件2：答案区末尾行不是典型的"答案结束"标记（如空行、分隔符）
+    const afterAnswerLines = afterAnswer.split('\n').filter(l => l.trim());
+    if (afterAnswerLines.length > 0) {
+      const lastLine = afterAnswerLines[afterAnswerLines.length - 1].trim();
+      // 如果答案区最后一行以计算符号结尾（=、+、-、×、÷），说明还在解析中
+      if (/[=+\-×÷>]\s*$/.test(lastLine)) return true;
+      // 如果最后一行是短数字，可能是中间计算结果
+      if (/^\d+(\.\d+)?$/.test(lastLine) && lastLine.length <= 10) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 查找内容中最后一个答案/解析标记的位置
+   */
+  private findLastAnswerMarkerPos(content: string): number {
+    let lastPos = -1;
+    for (const marker of this.answerKeywords) {
+      const pos = content.lastIndexOf(marker);
+      if (pos > lastPos) lastPos = pos;
+    }
+    return lastPos;
+  }
+
+  /**
+   * 检查行内容是否包含典型题目信号（问句、计算关键词等）
+   */
+  private hasQuestionContentSignals(line: string): boolean {
+    return /[？?]|多少|几[个种]|计算|求|问|填[空写]|选择/.test(line);
+  }
+
+  /**
+   * 从行首提取出题号数字（仅匹配 数字+点号 格式）
+   * 返回题号数字，若无法提取则返回 0
+   */
+  private extractQuestionNumber(line: string): number {
+    const m = line.match(/^\s*(?:[-–—]\s*)?(\d+)[\.．]/);
+    if (m) return parseInt(m[1]);
+    return 0;
+  }
+
+  /**
+   * 从块内容提取题号并更新 lastQuestionNumber
+   */
+  private updateLastQuestionNumber(content: string, lastNumber: number): number {
+    const num = this.extractQuestionNumber(content);
+    if (num > 0) return num;
+    return lastNumber;
+  }
   private getNumberingType(text: string): string {
     if (!text) return 'OTHER';
 
@@ -526,7 +644,6 @@ export class HybridQuestionIdentifier {
     if (/^[一二三四五六七八九十百]+[、\.]$/.test(text)) return 'CHINESE_NUM';
     if (/^[（(]\s*[一二三四五六七八九十百]+\s*[)）]$/.test(text)) return 'CHINESE_PAREN';
 
-    // Arabic numerals
     if (/^\d+[.．、]$/.test(text)) return 'ARABIC_DOT';
 
     // Small nums
@@ -571,11 +688,23 @@ export class HybridQuestionIdentifier {
     const preprocessedContent = this.mergeQuestionNumbers(content);
     const lines = preprocessedContent.split('\n');
 
+    // 找到第一个答案/解析标记之后的内容为"答案区"，其内的编号行不作为分割点
+    let answerZoneStart = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (this.hasAnswerKeyword(lines[i])) {
+        answerZoneStart = i;
+        break;
+      }
+    }
+
     // Pass 1: Determine types present and collect all separators with their line numbers
     const typesFound = new Set<string>();
     const separatorLines: Array<{ lineIndex: number; style: string; number: number }> = [];
 
     for (let i = 0; i < lines.length; i++) {
+      // 答案区内的编号行不作为分割点
+      if (answerZoneStart >= 0 && i > answerZoneStart) continue;
+
       const lineStripped = lines[i].trim();
       const match = this.listPattern.exec(lineStripped);
       if (match) {
@@ -608,6 +737,7 @@ export class HybridQuestionIdentifier {
     let introText = '';
     let isFirstChunk = true;
     let lastNumber = 0;
+    let subStepMode = false; // 进入子步骤模式后，后续编号行不再作为分隔符
 
     const flushBlock = (linesList: string[], isFirst: boolean = false) => {
       if (linesList.length === 0) return;
@@ -657,6 +787,12 @@ export class HybridQuestionIdentifier {
     let currentSeparatorIndex = 0;
 
     for (let i = 0; i < lines.length; i++) {
+      // 答案区内的行不参与分割（直接追加到当前块）
+      if (answerZoneStart >= 0 && i > answerZoneStart) {
+        currentSub.push(lines[i]);
+        continue;
+      }
+
       const lineStripped = lines[i].trim();
       const match = this.listPattern.exec(lineStripped);
       let isSeparator = false;
@@ -667,15 +803,27 @@ export class HybridQuestionIdentifier {
 
         // 检查是否是目标样式的分隔符
         if (targetStyle && style === targetStyle) {
-          isSeparator = true;
           const numMatch = text.match(/\d+/);
           const currentNumber = numMatch ? parseInt(numMatch[0]) : 0;
 
-          // 检测题号是否连续，如果不连续可能是遗漏了题目
-          if (lastNumber > 0 && currentNumber > lastNumber + 1 && currentNumber <= lastNumber + 3) {
-            console.log(`  [Warning] 题号不连续: ${lastNumber} -> ${currentNumber}，可能有遗漏`);
-          }
-          lastNumber = currentNumber;
+          // 题号连续性判断：
+           // - 如果编号从 1 重启且上一题号 > 1：很可能是答案区子步骤，不拆分
+           // - 进入子步骤模式后，后续编号行持续跳过，直到 flushBlock 重新开始
+           // - 如果编号连续增长：正常新题目
+           if (subStepMode) {
+             isSeparator = false;
+           } else if (lastNumber > 1 && currentNumber === 1 && answerZoneStart < 0) {
+             // 重启编号且之前未检测到答案区 → 进入子步骤模式，不拆分
+             isSeparator = false;
+             subStepMode = true;
+           } else {
+             isSeparator = true;
+             // 检测题号是否连续，如果不连续可能是遗漏了题目
+             if (lastNumber > 0 && currentNumber > lastNumber + 1 && currentNumber <= lastNumber + 3) {
+               console.log(`  [Warning] 题号不连续: ${lastNumber} -> ${currentNumber}，可能有遗漏`);
+             }
+             lastNumber = currentNumber;
+           }
         }
       }
 
@@ -910,6 +1058,12 @@ export class HybridQuestionIdentifier {
     // 策略6.5: 推断填空占位符 — OCR 丢失了下划线，在「空格 + 量词」处插入 ______
     // 例："相距 米." → "相距______米."  "是 米/分，" → "是______米/分，"
     cleaned = this.inferBlankPlaceholders(cleaned);
+
+    // 策略6.7: 将 Markdown 转义下划线 \_ 还原为填空占位符 ______
+    // 连续2个以上 \_ 是多重空格（如 \_\_\_\_ → ______）
+    cleaned = cleaned.replace(/(?:\\_){2,}/g, '______');
+    // 单独的 \_$ 后跟量词单位（°、度、米 等）→ 单格填空（如 \_$ ° → ______$ °）
+    cleaned = cleaned.replace(/\\_\$(?=\s*[°\u4e00-\u9fa5\d])/g, '______$$');
 
     // 策略7: 清理中文文本中多余的词间空格
     // 中文之间不应有空格："相向出 发" → "相向出发"
