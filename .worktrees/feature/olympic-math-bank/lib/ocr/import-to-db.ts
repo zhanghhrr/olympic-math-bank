@@ -1,10 +1,11 @@
-import { PrismaClient, QuestionType, Grade, QuestionStatus } from '@prisma/client';
+import { PrismaClient, Prisma, QuestionType, Grade, QuestionStatus } from '@prisma/client';
 import { ParsedQuestion } from './mineru-client';
 import { getTagPath, getTagHierarchy } from './knowledge-keywords';
 import { autoMatchKnowledgeTagsWithLLM } from './tagging';
 import { prisma } from '@/lib/db/prisma';
 import { verifyFormulasFromJson, serializeVerifiedFormulas, getVerifySummary } from './formula-verifier';
 import { detectQuestionType, HybridQuestionIdentifier } from './question-identifier';
+import { normalizeQuestionFields } from '@/lib/latex/normalizer';
 export { detectQuestionType };
 
 const importPrisma = prisma as PrismaClient;
@@ -25,7 +26,7 @@ export interface ImportResult {
     success: boolean;
     questionId?: string;
     error?: string;
-    matchedTags?: string[];
+    matchedTagId?: string | null;
     matchedTagDetails?: Array<{
       id: string;
       name: string;
@@ -57,20 +58,7 @@ export async function smartImportFromOCR(
   };
 
   // 预处理所有题目数据，收集成功后批量写入
-  const toCreate: Array<{
-    content: string;
-    answer: string;
-    solution: string;
-    type: QuestionType;
-    grade: Grade;
-    difficulty: number;
-    source: string;
-    status: QuestionStatus;
-    createdById: string;
-    formulas: any;
-    sourceBlocks: string | null;
-  }> = [];
-  const tagRelations: Array<{ questionIdx: number; tagIds: string[] }> = [];
+  const toCreate: Array<Prisma.QuestionCreateManyInput> = [];
   const failedItems: Array<{ error: string }> = [];
 
   for (const ocrResult of ocrResults) {
@@ -83,7 +71,7 @@ export async function smartImportFromOCR(
     try {
       const parsed = ocrResult.parsed;
 
-      let matchedTagIds: string[] = [];
+      let matchedTagId: string | null = null;
       if (autoMatchTags && parsed.content) {
         try {
           const combinedContent = [
@@ -91,16 +79,24 @@ export async function smartImportFromOCR(
             parsed.answer || '',
             parsed.analysis || ''
           ].join(' ');
-          matchedTagIds = await autoMatchKnowledgeTagsWithLLM(combinedContent, parsed.title);
+          matchedTagId = await autoMatchKnowledgeTagsWithLLM(combinedContent, parsed.title);
         } catch (tagError) {
           console.error('[Import Warning] 自动打标签失败，跳过:', tagError);
-          matchedTagIds = [];
+          matchedTagId = null;
         }
       }
 
       const questionType = HybridQuestionIdentifier.questionTypeToDB(detectQuestionType(parsed.content));
       const difficulty = estimateDifficulty(parsed.content);
       const cleanedContent = stripQuestionNumber(parsed.content);
+
+      // LaTeX 公式规范化：将 \R → \mathbb{R} 等快捷宏展开为标准 LaTeX
+      // 确保入库的公式格式统一，降低后续人工修正成本
+      const normalized = normalizeQuestionFields({
+        content: cleanedContent,
+        answer: parsed.answer || '',
+        solution: parsed.analysis || '',
+      });
 
       let verifiedFormulas = parsed.formulas || null;
       if (parsed.formulas) {
@@ -116,9 +112,9 @@ export async function smartImportFromOCR(
       }
 
       toCreate.push({
-        content: cleanedContent,
-        answer: parsed.answer || '',
-        solution: parsed.analysis || '',
+        content: normalized.content,
+        answer: normalized.answer,
+        solution: normalized.solution,
         type: questionType,
         grade: grade as Grade,
         difficulty,
@@ -127,11 +123,8 @@ export async function smartImportFromOCR(
         createdById: userId,
         formulas: verifiedFormulas,
         sourceBlocks: parsed.sourceBlocks || null,
+        knowledgeTagId: matchedTagId,
       });
-
-      if (matchedTagIds.length > 0) {
-        tagRelations.push({ questionIdx: toCreate.length - 1, tagIds: matchedTagIds });
-      }
     } catch (error) {
       console.error(`[Import Error] 题目导入失败:`, error);
       result.failed++;
@@ -147,54 +140,33 @@ export async function smartImportFromOCR(
         return created;
       });
 
-      // 查询刚创建的题目以获取 ID
+      // 查询刚创建的题目以获取 ID 和知识标签
       const createdQuestions = await importPrisma.question.findMany({
         where: { createdById: userId, source, status: QuestionStatus.DRAFT },
         orderBy: { createdAt: 'desc' },
         take: toCreate.length,
-      });
-
-      // 构建标签关联
-      const tagCreateData: Array<{ questionId: string; knowledgeTagId: string }> = [];
-      const successResults: Array<{ questionId: string; matchedTags: string[] }> = [];
-
-      for (let i = 0; i < tagRelations.length; i++) {
-        const { questionIdx, tagIds } = tagRelations[i];
-        // 反向映射：createdQuestions 是按 createdAt desc 排序的
-        const createdIdx = toCreate.length - 1 - questionIdx;
-        const question = createdQuestions[createdIdx];
-        if (question) {
-          successResults.push({ questionId: question.id, matchedTags: tagIds });
-          for (const tagId of tagIds) {
-            tagCreateData.push({ questionId: question.id, knowledgeTagId: tagId });
+        include: {
+          knowledgeTag: {
+            include: { parent: { include: { parent: { include: { parent: { include: { parent: true } } } } } } }
           }
         }
-      }
-
-      if (tagCreateData.length > 0) {
-        await importPrisma.questionKnowledgeTag.createMany({ data: tagCreateData });
-      }
+      });
 
       result.success = toCreate.length;
 
       // 构建返回详情
-      for (const sr of successResults) {
-        const matchedTags = await importPrisma.knowledgeTag.findMany({
-          where: { id: { in: sr.matchedTags } },
-          include: {
-            parent: { include: { parent: { include: { parent: { include: { parent: true } } } } } }
-          }
-        });
+      for (const q of createdQuestions) {
+        const details = q.knowledgeTag ? [{
+          id: q.knowledgeTag.id,
+          name: q.knowledgeTag.name,
+          path: getTagPath(q.knowledgeTag as any),
+          hierarchy: getTagHierarchy(q.knowledgeTag as any),
+        }] : [];
         result.questions.push({
           success: true,
-          questionId: sr.questionId,
-          matchedTags: sr.matchedTags,
-          matchedTagDetails: matchedTags.map(tag => ({
-            id: tag.id,
-            name: tag.name,
-            path: getTagPath(tag),
-            hierarchy: getTagHierarchy(tag),
-          })),
+          questionId: q.id,
+          matchedTagId: q.knowledgeTagId,
+          matchedTagDetails: details,
         });
       }
     } catch (error) {
@@ -219,8 +191,8 @@ export async function smartImportFromOCR(
 }
 
 export async function getQuestionTagPaths(questionId: string): Promise<string[]> {
-  const questionTags = await importPrisma.questionKnowledgeTag.findMany({
-    where: { questionId },
+  const question = await importPrisma.question.findUnique({
+    where: { id: questionId },
     include: {
       knowledgeTag: {
         include: {
@@ -230,7 +202,8 @@ export async function getQuestionTagPaths(questionId: string): Promise<string[]>
     }
   });
 
-  return questionTags.map(qt => getTagPath(qt.knowledgeTag));
+  if (!question?.knowledgeTag) return [];
+  return [getTagPath(question.knowledgeTag as any)];
 }
 
 export function estimateDifficulty(content: string, gradeHint?: string): number {

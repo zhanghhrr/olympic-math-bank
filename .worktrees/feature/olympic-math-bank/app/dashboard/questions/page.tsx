@@ -160,7 +160,7 @@ interface Question {
   competition: string | null;
   createdBy: { name: string };
   tags: { tag: { name: string; type: string } }[];
-  knowledgeTags?: { knowledgeTag: KnowledgeTag }[];
+  knowledgeTag?: KnowledgeTag | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -213,13 +213,16 @@ function DifficultyStars({ level }: { level: number }) {
 function QuestionCard({ 
   question, 
   isSelected, 
-  onSelectToggle 
+  onSelectToggle,
+  forceExpand
 }: { 
   question: Question;
   isSelected?: boolean;
   onSelectToggle?: (id: string) => void;
+  forceExpand?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [manualExpanded, setManualExpanded] = useState(false);
+  const expanded = forceExpand || manualExpanded;
   const [copied, setCopied] = useState(false);
 
   const status = statusConfig[question.status] || statusConfig.DRAFT;
@@ -270,7 +273,7 @@ function QuestionCard({
 
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setExpanded(!expanded)}
+              onClick={() => setManualExpanded(!manualExpanded)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                 expanded
                   ? 'bg-muted text-foreground hover:bg-muted/80'
@@ -278,7 +281,7 @@ function QuestionCard({
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>{expanded ? '收起' : '详情'}</span>
+              <span>{expanded ? (forceExpand && !manualExpanded ? '已全部展开' : '收起') : '详情'}</span>
               {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             <Link
@@ -314,11 +317,11 @@ function QuestionCard({
 
         <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
           <div className="flex items-center gap-4">
-            {question.knowledgeTags && question.knowledgeTags.length > 0 ? (
+            {question.knowledgeTag ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">知识标签:</span>
                 <span className="text-sm text-primary font-medium">
-                  {getTagPathDash(question.knowledgeTags[0].knowledgeTag)}
+                  {getTagPathDash(question.knowledgeTag)}
                 </span>
               </div>
             ) : (
@@ -403,14 +406,27 @@ export default function QuestionsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState({ status: '', grade: '', type: '', difficulty: '' });
+  const [filter, setFilter] = useState(() => {
+    // 从 localStorage 恢复筛选条件
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('questionFilters');
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return { status: '', grade: '', type: '', difficulty: '', tagId: '', hasImage: false, hasSolution: false };
+  });
   const [showFilters, setShowFilters] = useState(false);
+  const [availableTags, setAvailableTags] = useState<{ id: string; name: string; type: string }[]>([]);
   const [tagTree, setTagTree] = useState<KnowledgeTagTreeNode[]>([]);
   const [tagSearch, setTagSearch] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [showTagSidebar, setShowTagSidebar] = useState(true);
+
+  // 一键展开/收起所有解析
+  const [expandAll, setExpandAll] = useState(false);
 
   // 分页状态
   const [page, setPage] = useState(1);
@@ -447,8 +463,16 @@ export default function QuestionsPage() {
     }
   }, [selectedQuestionIds]);
 
+  // 筛选条件持久化到 localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('questionFilters', JSON.stringify(filter));
+    }
+  }, [filter]);
+
   useEffect(() => {
     fetchTagTree();
+    fetchTags();
   }, []);
 
   // 监听所有筛选条件变化，重置到第一页并刷新题目
@@ -460,7 +484,7 @@ export default function QuestionsPage() {
       // 不在第一页，重置页码（会触发分页 useEffect 自动刷新）
       setPage(1);
     }
-  }, [filter.status, filter.grade, filter.type, filter.difficulty, search, selectedTagId, selectedTagIds]);
+  }, [filter.status, filter.grade, filter.type, filter.difficulty, filter.tagId, filter.hasImage, filter.hasSolution, search, selectedTagId, selectedTagIds]);
 
   // 分页/排序变化时刷新题目
   useEffect(() => {
@@ -477,6 +501,16 @@ export default function QuestionsPage() {
     }
   };
 
+  const fetchTags = async () => {
+    try {
+      const res = await fetch('/api/tags');
+      const data = await res.json();
+      setAvailableTags(data.tags || []);
+    } catch (error) {
+      console.error('Failed to fetch tags:', error);
+    }
+  };
+
   const fetchQuestions = async () => {
     try {
       const params = new URLSearchParams();
@@ -484,6 +518,9 @@ export default function QuestionsPage() {
       if (filter.grade) params.append('grade', filter.grade);
       if (filter.type) params.append('type', filter.type);
       if (filter.difficulty) params.append('difficulty', filter.difficulty);
+      if (filter.tagId) params.append('tagIds', filter.tagId);
+      if (filter.hasImage) params.append('hasImage', 'true');
+      if (filter.hasSolution) params.append('hasSolution', 'true');
       if (search) params.append('search', search);
       if (selectedTagIds.length > 0) {
         params.append('knowledgeTagIds', selectedTagIds.join(','));
@@ -589,7 +626,7 @@ export default function QuestionsPage() {
   // 合并手动展开和自动展开的节点
   const mergedExpandedNodes = new Set([...expandedNodes, ...autoExpandedIds]);
 
-  const hasActiveFilters = filter.status || filter.grade || filter.type || selectedTagId;
+  const hasActiveFilters = filter.status || filter.grade || filter.type || filter.tagId || filter.hasImage || filter.hasSolution || selectedTagId;
 
   // 切换题目选中状态
   const handleSelectQuestion = (id: string) => {
@@ -599,26 +636,6 @@ export default function QuestionsPage() {
       else next.add(id);
       return next;
     });
-  };
-
-  // 跨页全选：获取当前筛选条件下所有题目的 ID
-  const handleSelectAllFiltered = async () => {
-    const params = new URLSearchParams();
-    if (filter.status) params.append('status', filter.status);
-    if (filter.grade) params.append('grade', filter.grade);
-    if (filter.type) params.append('type', filter.type);
-    if (filter.difficulty) params.append('difficulty', filter.difficulty);
-    if (search) params.append('search', search);
-    if (selectedTagIds.length > 0) params.append('knowledgeTagIds', selectedTagIds.join(','));
-    params.append('limit', '1000');
-    params.append('fields', 'id');
-
-    try {
-      const res = await fetch(`/api/questions?${params}`);
-      const data = await res.json();
-      const allIds = (data.questions || []).map((q: { id: string }) => q.id);
-      setSelectedQuestionIds(new Set(allIds));
-    } catch {}
   };
 
   // 全选/取消全选当前页
@@ -664,14 +681,15 @@ export default function QuestionsPage() {
     }
   };
 
-  const handleBatchTagConfirm = async (tagIds: string[]) => {
+  const handleBatchTagConfirm = async (tagId: string | null) => {
+    if (!tagId) return;
     const ids = Array.from(selectedQuestionIds);
     setBatchUpdating(true);
     try {
       const res = await fetch('/api/questions/batch', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, data: { knowledgeTagIds: tagIds } }),
+        body: JSON.stringify({ ids, data: { knowledgeTagId: tagId } }),
       });
       const result = await res.json();
       if (result.success > 0) {
@@ -760,8 +778,8 @@ export default function QuestionsPage() {
 
   return (
     <div className="flex h-full">
-      {/* 主内容区 */}
-      <div className="flex-1 p-6 overflow-y-auto">
+      {/* 主内容区，max-w-6xl 限制最大宽度为 72rem（约 1152px），改善长文本阅读体验 */}
+      <div className="flex-1 p-6 overflow-y-auto max-w-6xl mx-auto">
         <div className="space-y-6">
           {/* 页面标题 */}
           <div className="flex items-center justify-between">
@@ -810,6 +828,68 @@ export default function QuestionsPage() {
             </div>
           </div>
 
+          {/* 搜索结果面包屑 */}
+          {search && (
+            <div className="flex items-center gap-3 mb-2 px-1">
+              <button
+                onClick={() => setSearch('')}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+                </svg>
+                返回
+              </button>
+              <span className="text-sm text-muted-foreground">
+                "<span className="font-medium text-foreground">{search}</span>"的搜索结果：共 <b className="text-foreground">{totalCount}</b> 道题
+              </span>
+            </div>
+          )}
+
+          {/* 审核状态 Tab 切换 */}
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              onClick={() => setFilter((f: typeof filter) => ({ ...f, status: '' }))}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                !filter.status
+                  ? 'bg-primary/10 text-primary border border-primary/30 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent'
+              }`}
+            >
+              全部题目
+            </button>
+            <button
+              onClick={() => setFilter((f: typeof filter) => ({ ...f, status: 'APPROVED' }))}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                filter.status === 'APPROVED'
+                  ? 'bg-primary/10 text-primary border border-primary/30 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent'
+              }`}
+            >
+              已审核
+            </button>
+            <button
+              onClick={() => setFilter((f: typeof filter) => ({ ...f, status: 'DRAFT' }))}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                filter.status === 'DRAFT'
+                  ? 'bg-primary/10 text-primary border border-primary/30 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent'
+              }`}
+            >
+              草稿
+            </button>
+            <button
+              onClick={() => setFilter((f: typeof filter) => ({ ...f, status: 'PENDING' }))}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                filter.status === 'PENDING'
+                  ? 'bg-primary/10 text-primary border border-primary/30 shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent'
+              }`}
+            >
+              待审核
+            </button>
+          </div>
+
           {/* 搜索和筛选区域 */}
           <div className="card-elevated p-4">
             <div className="flex gap-4 items-center">
@@ -832,41 +912,43 @@ export default function QuestionsPage() {
               </div>
               <button
                 onClick={() => setShowFilters(!showFilters)}
-                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                  showFilters || (filter.status || filter.grade || filter.type)
+                className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${showFilters || (filter.status || filter.grade || filter.type || filter.hasImage || filter.hasSolution)
                     ? 'bg-primary/10 text-primary border border-primary/30'
                     : 'bg-muted text-muted-foreground border border-transparent hover:bg-muted/80'
                 }`}
               >
                 <Filter className="w-4 h-4" />
                 筛选
-                {(filter.status || filter.grade || filter.type || filter.difficulty) && (
+                {(filter.status || filter.grade || filter.type || filter.difficulty || filter.tagId || filter.hasImage || filter.hasSolution) && (
                   <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
-                    {(filter.status ? 1 : 0) + (filter.grade ? 1 : 0) + (filter.type ? 1 : 0) + (filter.difficulty ? 1 : 0)}
+                    {(filter.status ? 1 : 0) + (filter.grade ? 1 : 0) + (filter.type ? 1 : 0) + (filter.difficulty ? 1 : 0) + (filter.tagId ? 1 : 0) + (filter.hasImage ? 1 : 0) + (filter.hasSolution ? 1 : 0)}
                   </span>
                 )}
               </button>
-              {/* 排序下拉框 */}
-              <div className="relative flex items-center gap-2">
-                <ArrowUpDown className="w-4 h-4 text-muted-foreground" />
-                <select
-                  value={`${sortBy}-${sortOrder}`}
-                  onChange={(e) => {
-                    const [field, order] = e.target.value.split('-');
-                    setSortBy(field);
-                    setSortOrder(order as 'asc' | 'desc');
-                  }}
-                  className="select-field text-sm h-10"
-                >
-                  <option value="updatedAt-desc">最近更新</option>
-                  <option value="updatedAt-asc">最早更新</option>
-                  <option value="createdAt-desc">最近创建</option>
-                  <option value="createdAt-asc">最早创建</option>
-                  <option value="difficulty-desc">难度高→低</option>
-                  <option value="difficulty-asc">难度低→高</option>
-                  <option value="grade-desc">年级高→低</option>
-                  <option value="grade-asc">年级低→高</option>
-                </select>
+              {/* 排序按钮组 */}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <ArrowUpDown className="w-4 h-4 text-muted-foreground mr-1" />
+                {([
+                  { label: '最近更新', field: 'updatedAt', order: 'desc' as const },
+                  { label: '最早更新', field: 'updatedAt', order: 'asc' as const },
+                  { label: '难度高→低', field: 'difficulty', order: 'desc' as const },
+                  { label: '难度低→高', field: 'difficulty', order: 'asc' as const },
+                ]).map(opt => {
+                  const isActive = sortBy === opt.field && sortOrder === opt.order;
+                  return (
+                    <button
+                      key={`${opt.field}-${opt.order}`}
+                      onClick={() => { setSortBy(opt.field); setSortOrder(opt.order); }}
+                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
+                        isActive
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -931,11 +1013,48 @@ export default function QuestionsPage() {
                     <option value="5">★★★★★</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">基础标签</label>
+                  <select
+                    value={filter.tagId}
+                    onChange={(e) => { setFilter({ ...filter, tagId: e.target.value }); }}
+                    className="select-field select-field-full"
+                  >
+                    <option value="">全部</option>
+                    {availableTags.map((tag) => (
+                      <option key={tag.id} value={tag.id}>{tag.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">&nbsp;</label>
+                  <label className="flex items-center gap-2 py-2 px-3 rounded-lg border border-border hover:border-primary/30 cursor-pointer transition-colors select-none">
+                    <input
+                      type="checkbox"
+                      checked={filter.hasImage}
+                      onChange={(e) => { setFilter({ ...filter, hasImage: e.target.checked }); }}
+                      className="w-4 h-4 rounded border-muted-foreground/30 text-primary focus:ring-primary/20 cursor-pointer"
+                    />
+                    <span className="text-sm text-foreground">有图</span>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">&nbsp;</label>
+                  <label className="flex items-center gap-2 py-2 px-3 rounded-lg border border-border hover:border-primary/30 cursor-pointer transition-colors select-none">
+                    <input
+                      type="checkbox"
+                      checked={filter.hasSolution}
+                      onChange={(e) => { setFilter({ ...filter, hasSolution: e.target.checked }); }}
+                      className="w-4 h-4 rounded border-muted-foreground/30 text-primary focus:ring-primary/20 cursor-pointer"
+                    />
+                    <span className="text-sm text-foreground">有解析</span>
+                  </label>
+                </div>
                 <div className="col-span-4 flex justify-end gap-2">
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => { setFilter({ status: '', grade: '', type: '', difficulty: '' }); }}
+                    onClick={() => { setFilter({ status: '', grade: '', type: '', difficulty: '', tagId: '', hasImage: false, hasSolution: false }); }}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     重置
@@ -987,14 +1106,17 @@ export default function QuestionsPage() {
                     />
                     <span>全选当前页</span>
                   </div>
-                  <button
-                    onClick={handleSelectAllFiltered}
-                    className="text-sm text-primary hover:underline"
-                    disabled={totalCount > 1000}
-                    title={totalCount > 1000 ? '超过1000题，暂时不支持全选' : '全选筛选结果中的所有题目'}
-                  >
-                    全选全部 ({totalCount}题)
-                  </button>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={expandAll}
+                        onChange={(e) => setExpandAll(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-muted-foreground/30 text-primary focus:ring-primary/20 cursor-pointer"
+                      />
+                      <span>显示所有解析</span>
+                    </label>
+                  </div>
                   <div>
                     共 {totalCount} 道题目
                     {selectedTagId && <span className="text-primary ml-2">(已按标签筛选)</span>}
@@ -1006,6 +1128,7 @@ export default function QuestionsPage() {
                     question={question} 
                     isSelected={selectedQuestionIds.has(question.id)}
                     onSelectToggle={handleSelectQuestion}
+                    forceExpand={expandAll}
                   />
                 ))}
                 {/* 底部翻页栏 */}

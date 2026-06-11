@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const questions = await prisma.question.findMany({
       where: { id: { in: questionIds } },
       include: {
-        knowledgeTags: { include: { knowledgeTag: true } },
+        knowledgeTag: true,
       },
       orderBy: { updatedAt: 'desc' },
     });

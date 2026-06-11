@@ -27,12 +27,12 @@ interface TagHierarchy {
 }
 
 interface KnowledgeTagDisplayProps {
-  tags: Array<{
+  tag: {
     id: string;
     name: string;
     level: number;
     parent?: any;
-  }>;
+  } | null | undefined;
   showPath?: boolean;
   compact?: boolean;
 }
@@ -67,147 +67,114 @@ function getModuleIcon(moduleName?: string): string {
   return icons[moduleName || ''] || '🏷️';
 }
 
-export function KnowledgeTagDisplay({ tags, showPath = true, compact = false }: KnowledgeTagDisplayProps) {
-  if (!tags || tags.length === 0) {
+export function KnowledgeTagDisplay({ tag, showPath = true, compact = false }: KnowledgeTagDisplayProps) {
+  if (!tag) {
     return <span className="text-gray-400 text-sm">未分类</span>;
   }
 
+  const hierarchy = getTagHierarchy(tag);
+  const moduleName = hierarchy.level1;
+  const colorClass = getModuleColor(moduleName);
+  const icon = getModuleIcon(moduleName);
+
+  if (compact) {
+    return (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${colorClass}`}
+        title={getTagPathDash(tag)}
+      >
+        {icon} {tag.name}
+      </span>
+    );
+  }
+
   return (
-    <div className="space-y-2">
-      {tags.map((tag, index) => {
-        const hierarchy = getTagHierarchy(tag);
-        const moduleName = hierarchy.level1;
-        const colorClass = getModuleColor(moduleName);
-        const icon = getModuleIcon(moduleName);
+    <div className="bg-white rounded-lg border border-gray-200 p-3">
+      {/* 完整路径展示 */}
+      {showPath && (
+        <div className="flex flex-wrap items-center gap-1 text-sm mb-2">
+          {hierarchy.level1 && (
+            <>
+              <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">
+                {icon} {hierarchy.level1}
+              </span>
+              <span className="text-gray-400">›</span>
+            </>
+          )}
+          {hierarchy.level2 && (
+            <>
+              <span className="px-2 py-0.5 rounded bg-gray-50 text-gray-600">
+                {hierarchy.level2}
+              </span>
+              <span className="text-gray-400">›</span>
+            </>
+          )}
+          {hierarchy.level3 && (
+            <>
+              <span className="px-2 py-0.5 rounded bg-gray-50 text-gray-600">
+                {hierarchy.level3}
+              </span>
+              <span className="text-gray-400">›</span>
+            </>
+          )}
+          {hierarchy.level4 && (
+            <>
+              <span className="px-2 py-0.5 rounded bg-gray-50 text-gray-600">
+                {hierarchy.level4}
+              </span>
+              <span className="text-gray-400">›</span>
+            </>
+          )}
+          <span className={`px-2 py-0.5 rounded font-medium ${colorClass}`}>
+            {hierarchy.level5}
+          </span>
+        </div>
+      )}
 
-        if (compact) {
-          // 紧凑模式：只显示技能标签和模块颜色
-          return (
-            <span
-              key={tag.id}
-              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${colorClass}`}
-              title={getTagPathDash(tag)}
-            >
-              {icon} {tag.name}
-            </span>
-          );
-        }
-
-        return (
-          <div key={tag.id} className="bg-white rounded-lg border border-gray-200 p-3">
-            {/* 完整路径展示 */}
-            {showPath && (
-              <div className="flex flex-wrap items-center gap-1 text-sm mb-2">
-                {hierarchy.level1 && (
-                  <>
-                    <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">
-                      {icon} {hierarchy.level1}
-                    </span>
-                    <span className="text-gray-400">›</span>
-                  </>
-                )}
-                {hierarchy.level2 && (
-                  <>
-                    <span className="px-2 py-0.5 rounded bg-gray-50 text-gray-600">
-                      {hierarchy.level2}
-                    </span>
-                    <span className="text-gray-400">›</span>
-                  </>
-                )}
-                {hierarchy.level3 && (
-                  <>
-                    <span className="px-2 py-0.5 rounded bg-gray-50 text-gray-600">
-                      {hierarchy.level3}
-                    </span>
-                    <span className="text-gray-400">›</span>
-                  </>
-                )}
-                {hierarchy.level4 && (
-                  <>
-                    <span className="px-2 py-0.5 rounded bg-gray-50 text-gray-600">
-                      {hierarchy.level4}
-                    </span>
-                    <span className="text-gray-400">›</span>
-                  </>
-                )}
-                <span className={`px-2 py-0.5 rounded font-medium ${colorClass}`}>
+      {/* 认知路径展示 */}
+      <div className="mt-2 pt-2 border-t border-gray-100">
+        <div className="flex items-start gap-2">
+          <span className="text-xs text-gray-500 mt-1">认知路径:</span>
+          <div className="flex-1">
+            <div className="flex items-center gap-1 flex-wrap">
+              <div className="flex flex-col items-center">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-lg ${colorClass}`}>
+                  {icon}
+                </div>
+                <span className="text-xs text-gray-500 mt-1">{hierarchy.level1 || '模块'}</span>
+              </div>
+              <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
+              <div className="flex flex-col items-center">
+                <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs text-gray-600">2</div>
+                <span className="text-xs text-gray-500 mt-1 max-w-[60px] truncate" title={hierarchy.level2}>
+                  {hierarchy.level2 || '专题'}
+                </span>
+              </div>
+              <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
+              <div className="flex flex-col items-center">
+                <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs text-gray-600">3</div>
+                <span className="text-xs text-gray-500 mt-1 max-w-[60px] truncate" title={hierarchy.level3}>
+                  {hierarchy.level3 || '子专题'}
+                </span>
+              </div>
+              <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
+              <div className="flex flex-col items-center">
+                <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs text-gray-600">4</div>
+                <span className="text-xs text-gray-500 mt-1 max-w-[60px] truncate" title={hierarchy.level4}>
+                  {hierarchy.level4 || '知识点'}
+                </span>
+              </div>
+              <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
+              <div className="flex flex-col items-center">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${colorClass}`}>5</div>
+                <span className="text-xs font-medium mt-1 max-w-[80px] truncate" title={hierarchy.level5}>
                   {hierarchy.level5}
                 </span>
               </div>
-            )}
-
-            {/* 认知路径展示（从概括到具体） */}
-            <div className="mt-2 pt-2 border-t border-gray-100">
-              <div className="flex items-start gap-2">
-                <span className="text-xs text-gray-500 mt-1">认知路径:</span>
-                <div className="flex-1">
-                  <div className="flex items-center gap-1 flex-wrap">
-                    {/* 模块 - 最概括 */}
-                    <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-lg ${colorClass}`}>
-                        {icon}
-                      </div>
-                      <span className="text-xs text-gray-500 mt-1">{hierarchy.level1 || '模块'}</span>
-                    </div>
-
-                    {/* 连接线 */}
-                    <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
-
-                    {/* 专题 */}
-                    <div className="flex flex-col items-center">
-                      <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs text-gray-600">
-                        2
-                      </div>
-                      <span className="text-xs text-gray-500 mt-1 max-w-[60px] truncate" title={hierarchy.level2}>
-                        {hierarchy.level2 || '专题'}
-                      </span>
-                    </div>
-
-                    {/* 连接线 */}
-                    <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
-
-                    {/* 子专题 */}
-                    <div className="flex flex-col items-center">
-                      <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs text-gray-600">
-                        3
-                      </div>
-                      <span className="text-xs text-gray-500 mt-1 max-w-[60px] truncate" title={hierarchy.level3}>
-                        {hierarchy.level3 || '子专题'}
-                      </span>
-                    </div>
-
-                    {/* 连接线 */}
-                    <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
-
-                    {/* 知识点 */}
-                    <div className="flex flex-col items-center">
-                      <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-xs text-gray-600">
-                        4
-                      </div>
-                      <span className="text-xs text-gray-500 mt-1 max-w-[60px] truncate" title={hierarchy.level4}>
-                        {hierarchy.level4 || '知识点'}
-                      </span>
-                    </div>
-
-                    {/* 连接线 */}
-                    <div className="w-8 h-0.5 bg-gray-200 mt-[-16px]"></div>
-
-                    {/* 技能 - 最具体 */}
-                    <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${colorClass}`}>
-                        5
-                      </div>
-                      <span className="text-xs font-medium mt-1 max-w-[80px] truncate" title={hierarchy.level5}>
-                        {hierarchy.level5}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
-        );
-      })}
+        </div>
+      </div>
     </div>
   );
 }

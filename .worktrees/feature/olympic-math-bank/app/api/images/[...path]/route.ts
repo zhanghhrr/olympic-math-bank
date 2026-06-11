@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import path from 'path';
 import fs from 'fs';
 
@@ -6,6 +8,12 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  // OCR 导入图片需要登录后访问
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: '未登录' }, { status: 401 });
+  }
+
   const { path: pathParts } = await params;
 
   if (pathParts.length === 0) {

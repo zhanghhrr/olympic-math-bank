@@ -22,15 +22,11 @@ export async function GET(
     include: {
       createdBy: { select: { name: true } },
       tags: { include: { tag: true } },
-      knowledgeTags: {
+      knowledgeTag: {
         include: {
-          knowledgeTag: {
+          parent: {
             include: {
-              parent: {
-                include: {
-                  parent: true, // 仅三层，减少不必要的五层嵌套
-                },
-              },
+              parent: true,
             },
           },
         },
@@ -58,13 +54,13 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { content, answer, solution, type, options, grade, difficulty, source, year, competition, tagIds, knowledgeTagIds } = body;
+  const { content, answer, solution, type, options, grade, difficulty, source, year, competition, tagIds, knowledgeTagId } = body;
 
   // 保存版本快照：更新前先将当前题目数据写入 QuestionVersion
   const currentQuestion = await prisma.question.findUnique({
     where: { id },
     include: {
-      knowledgeTags: { select: { knowledgeTagId: true } },
+      knowledgeTag: true,
       tags: { select: { tagId: true } },
     },
   });
@@ -152,14 +148,12 @@ export async function PUT(
     }
   }
 
-  // 更新知识标签
-  if (knowledgeTagIds !== undefined) {
-    await prisma.questionKnowledgeTag.deleteMany({ where: { questionId: id } });
-    if (knowledgeTagIds.length > 0) {
-      await prisma.questionKnowledgeTag.createMany({
-        data: knowledgeTagIds.map((knowledgeTagId: string) => ({ questionId: id, knowledgeTagId })),
-      });
-    }
+  // 更新知识标签（单标签字段）
+  if (knowledgeTagId !== undefined) {
+    await prisma.question.update({
+      where: { id },
+      data: { knowledgeTagId: knowledgeTagId || null },
+    });
   }
 
   return NextResponse.json({ ...question, type: normalizeQuestionType(question.type) });

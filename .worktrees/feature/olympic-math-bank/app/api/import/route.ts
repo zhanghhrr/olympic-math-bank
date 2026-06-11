@@ -8,31 +8,11 @@ import { mkdir } from 'fs/promises';
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  
-  // 获取或创建用户
-  let userId: string;
-
-  const sessionUserId = (session?.user as any)?.id;
-  if (sessionUserId) {
-    userId = sessionUserId as string;
-  } else {
-    // 开发环境：查找或创建默认用户
-    let defaultUser = await prisma.user.findFirst({
-      where: { email: 'admin@example.com' }
-    });
-    
-    if (!defaultUser) {
-      defaultUser = await prisma.user.create({
-        data: {
-          email: 'admin@example.com',
-          name: '管理员',
-          role: 'ADMIN',
-        }
-      });
-    }
-    
-    userId = defaultUser.id;
+  if (!session || !session.user) {
+    return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
+
+  const userId = (session.user as any).id as string;
 
   try {
     const formData = await request.formData();

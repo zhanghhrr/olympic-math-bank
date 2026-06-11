@@ -223,11 +223,7 @@ async function importQuestions(
             source: options.source || 'PDF导入',
             status: 'DRAFT',
             createdById: userId,
-            knowledgeTags: {
-              create: tagIds.map(tagId => ({
-                knowledgeTagId: tagId,
-              })),
-            },
+            knowledgeTagId: tagIds[0] || null,
           },
         });
 
@@ -248,13 +244,13 @@ async function importQuestions(
  */
 async function getDefaultUser() {
   let user = await prisma.user.findFirst({
-    where: { email: 'admin@example.com' },
+    where: { phone: '13704592025' },
   });
 
   if (!user) {
     user = await prisma.user.create({
       data: {
-        email: 'admin@example.com',
+        phone: '13704592025',
         name: '管理员',
         role: 'ADMIN',
       },

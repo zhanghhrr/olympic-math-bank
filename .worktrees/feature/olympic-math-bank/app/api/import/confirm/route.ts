@@ -41,21 +41,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少题目列表' }, { status: 400 });
     }
 
-    let userId: string;
     const sessionUserId = (session?.user as any)?.id;
-    if (sessionUserId) {
-      userId = sessionUserId as string;
-    } else {
-      let defaultUser = await prisma.user.findFirst({
-        where: { email: 'admin@example.com' },
-      });
-      if (!defaultUser) {
-        defaultUser = await prisma.user.create({
-          data: { email: 'admin@example.com', name: '管理员', role: 'ADMIN' },
-        });
-      }
-      userId = defaultUser.id;
+    if (!sessionUserId) {
+      return NextResponse.json({ error: '用户不存在' }, { status: 401 });
     }
+    const userId = sessionUserId as string;
 
     // 预处理所有题目数据
     const preparedQuestions = await Promise.all(
@@ -68,7 +58,8 @@ export async function POST(request: NextRequest) {
         } else {
           try {
             const combinedContent = [q.content, q.answer, q.solution].join(' ');
-            matchedTagIds = await autoMatchKnowledgeTagsWithLLM(combinedContent);
+            const tagId = await autoMatchKnowledgeTagsWithLLM(combinedContent);
+            if (tagId) matchedTagIds = [tagId];
           } catch (tagError) {
             console.error('[Confirm Import] 自动打标签失败:', tagError);
           }
@@ -103,6 +94,7 @@ export async function POST(request: NextRequest) {
           formulas: verifiedFormulas,
           sourceBlocks: q.sourceBlocks || null,
           tagIds: matchedTagIds,
+          knowledgeTagId: matchedTagIds[0] || null,
         };
       }),
     );
@@ -132,24 +124,11 @@ export async function POST(request: NextRequest) {
             createdById: pq.createdById,
             formulas: pq.formulas,
             sourceBlocks: pq.sourceBlocks,
+            knowledgeTagId: pq.knowledgeTagId,
           },
         }),
       ),
     );
-
-    // 批量创建知识标签关联
-    const tagRelations = createdQuestions.flatMap((q, i) =>
-      preparedQuestions[i].tagIds.map((tagId) => ({
-        questionId: q.id,
-        knowledgeTagId: tagId,
-      })),
-    );
-
-    if (tagRelations.length > 0) {
-      await prisma.questionKnowledgeTag.createMany({
-        data: tagRelations,
-      });
-    }
 
     return NextResponse.json({
       success: true,

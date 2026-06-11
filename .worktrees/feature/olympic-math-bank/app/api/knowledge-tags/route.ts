@@ -14,8 +14,9 @@ export async function GET(request: NextRequest) {
     const level = searchParams.get('level');
     const module = searchParams.get('module');
     const parentId = searchParams.get('parentId');
+    const namespace = searchParams.get('namespace') || 'default';
 
-    const where: any = {};
+    const where: any = { namespace };
     if (level) where.level = parseInt(level);
     if (module) where.module = module;
     if (parentId) where.parentId = parentId;

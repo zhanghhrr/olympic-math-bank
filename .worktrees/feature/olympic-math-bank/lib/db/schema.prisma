@@ -3,17 +3,13 @@ generator client {
 }
 
 // 数据库数据源配置
-//   - 本地开发(SQLite): provider = "sqlite",   DATABASE_URL="file:./dev.db"
-//   - 生产部署(PostgreSQL): provider = "postgresql", DATABASE_URL="postgresql://..."
-// 部署到云服务器时，取消下方注释并注释 SQLite 配置：
+//   本地开发: provider = "sqlite",   DATABASE_URL="file:./dev.db"（.env.local 中配置）
+//   Docker 部署: provider 自动切换为 "postgresql"（Dockerfile 中 sed 替换）
+//   无需手动修改，Docker 构建时自动处理
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
-// datasource db {
-//   provider = "postgresql"
-//   url      = env("DATABASE_URL")
-// }
 
 // 用户角色
 enum UserRole {
@@ -67,10 +63,11 @@ enum ImportStatus {
 // 用户表
 model User {
   id            String    @id @default(uuid())
-  email         String    @unique
+  phone         String    @unique  // 手机号，登录唯一标识
   name          String
   role          UserRole  @default(EDITOR)
   password      String?   // 可选，支持 OAuth
+  email         String?   // 邮箱（可选）
   image         String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -79,6 +76,7 @@ model User {
   questions     Question[]
   reviews       Review[]
   importJobs    ImportJob[]
+  exportJobs    ExportJob[]
   versions      QuestionVersion[]
 
   @@map("users")
@@ -106,11 +104,12 @@ model Question {
   createdById     String
   createdBy       User            @relation(fields: [createdById], references: [id])
   currentVersionId String?        @unique
+  knowledgeTagId  String?         // 唯一知识标签（五级叶子节点），一道题只能有一个
+  knowledgeTag    KnowledgeTag?   @relation(fields: [knowledgeTagId], references: [id], onDelete: SetNull)
   
   // 关联
   images          QuestionImage[]
   tags            QuestionTag[]
-  knowledgeTags   QuestionKnowledgeTag[]
   reviews         Review[]
   versions        QuestionVersion[]
   importItems     ImportJobItem[]
@@ -224,6 +223,25 @@ model ImportJob {
   @@map("import_jobs")
 }
 
+// PDF 导出任务表（异步轮询模式，仿教研云方案）
+model ExportJob {
+  id              String       @id @default(uuid())
+  fileName        String                        // 导出文件名，如 "exam_20250101.pdf"
+  filePath        String?                       // 服务器上 PDF 文件路径（COMPLETED 时有值）
+  fileSize        Int?                          // 文件大小（字节）
+  status          ImportStatus @default(PENDING) // PENDING|PROCESSING|COMPLETED|FAILED
+  mode            String       @default("student") // "student"|"teacher"
+  questionCount   Int          @default(0)      // 包含题目数
+  error           String?                       // 失败原因
+  blocksJson      String?                       // JSON: 前端 blocks 原始数据（用于重试）
+  createdById     String
+  createdBy       User         @relation(fields: [createdById], references: [id])
+  createdAt       DateTime     @default(now())
+  completedAt     DateTime?
+
+  @@map("export_jobs")
+}
+
 // 导入任务项表
 model ImportJobItem {
   id              String          @id @default(uuid())
@@ -248,39 +266,32 @@ model KnowledgeTag {
   name            String          // 标签名称
   code            String          @unique  // 唯一编码，如 "计算模块-整数-整数加减-整数加法运算-加法横式"
   
+  // 标签树命名空间："default"=系统五级知识树, "散测入学"=散测题库两级标签, ...完全隔离
+  namespace       String          @default("default") // 标签树命名空间
+
   // 五级层级关系
   module          String          // 一级：模块（如：计算模块、几何模块）
   topic           String?         // 二级：专题（如：整数、小数、分数）
   subtopic        String?         // 三级：子专题（如：整数加减、整数乘除）
   knowledge       String?         // 四级：知识点（如：整数加法运算）
   skill           String?         // 五级：技能（如：加法横式、加法竖式）
-  
+
   // 父子关系（可选，用于快速查询）
   parentId        String?
   parent          KnowledgeTag?   @relation("KnowledgeHierarchy", fields: [parentId], references: [id])
   children        KnowledgeTag[]  @relation("KnowledgeHierarchy")
-  
+
   // 排序
   order           Int             @default(0)
-  
-  // 关联
-  questions       QuestionKnowledgeTag[]
-  
+
+  // 关联（反向：标签被哪些题目引用）
+  questions       Question[]
+
   createdAt       DateTime        @default(now())
-  
+
+  @@index([namespace])
   @@index([module])
   @@index([level])
   @@index([code])
   @@map("knowledge_tags")
-}
-
-// 题目与知识标签关联表
-model QuestionKnowledgeTag {
-  questionId      String
-  question        Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  knowledgeTagId  String
-  knowledgeTag    KnowledgeTag    @relation(fields: [knowledgeTagId], references: [id], onDelete: Cascade)
-  
-  @@id([questionId, knowledgeTagId])
-  @@map("question_knowledge_tags")
 }

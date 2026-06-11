@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
 
@@ -21,18 +21,14 @@ export async function POST(request: NextRequest) {
     const questions = await prisma.question.findMany({
       where: { id: { in: questionIds } },
       include: {
-        knowledgeTags: {
+        knowledgeTag: {
           include: {
-            knowledgeTag: {
+            parent: {
               include: {
                 parent: {
                   include: {
                     parent: {
-                      include: {
-                        parent: {
-                          include: { parent: true },
-                        },
-                      },
+                      include: { parent: true },
                     },
                   },
                 },
@@ -53,52 +49,66 @@ export async function POST(request: NextRequest) {
       P1: '一年级', P2: '二年级', P3: '三年级', P4: '四年级', P5: '五年级', P6: '六年级',
     };
 
-    const rows = questions.map(q => {
-      const tagPaths = q.knowledgeTags.map(kt => {
-        const tag = kt.knowledgeTag;
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('题库导出');
+
+    worksheet.columns = [
+      { header: 'ID', key: 'id', width: 25 },
+      { header: '题干', key: 'content', width: 50 },
+      { header: '答案', key: 'answer', width: 30 },
+      { header: '解析', key: 'solution', width: 40 },
+      { header: '题型', key: 'type', width: 10 },
+      { header: '年级', key: 'grade', width: 8 },
+      { header: '难度', key: 'difficulty', width: 10 },
+      { header: '状态', key: 'status', width: 8 },
+      { header: '来源', key: 'source', width: 20 },
+      { header: '年份', key: 'year', width: 8 },
+      { header: '竞赛', key: 'competition', width: 15 },
+      { header: '知识标签', key: 'tagPath', width: 40 },
+      { header: '创建者', key: 'creator', width: 10 },
+      { header: '创建时间', key: 'createdAt', width: 20 },
+    ];
+
+    // 设置表头样式
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true };
+    headerRow.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE8D5C4' },
+    };
+
+    for (const q of questions) {
+      const tagPath = (() => {
+        if (!q.knowledgeTag) return '';
         const parts: string[] = [];
-        let current: any = tag;
+        let current: any = q.knowledgeTag;
         while (current) {
           parts.unshift(current.name);
           current = current.parent;
         }
         return parts.join(' > ');
-      }).join('; ');
+      })();
 
-      return {
-        'ID': q.id,
-        '题干': q.content,
-        '答案': q.answer,
-        '解析': q.solution || '',
-        '题型': typeLabels[q.type] || q.type,
-        '年级': gradeLabels[q.grade] || q.grade,
-        '难度': '★'.repeat(q.difficulty),
-        '状态': q.status === 'APPROVED' ? '已审核' : q.status === 'PENDING' ? '待审核' : q.status === 'DRAFT' ? '草稿' : '已拒绝',
-        '来源': q.source || '',
-        '年份': q.year ? String(q.year) : '',
-        '竞赛': q.competition || '',
-        '知识标签': tagPaths,
-        '创建者': q.createdBy?.name || '',
-        '创建时间': q.createdAt.toLocaleString('zh-CN'),
-      };
-    });
+      worksheet.addRow({
+        id: q.id,
+        content: q.content,
+        answer: q.answer,
+        solution: q.solution || '',
+        type: typeLabels[q.type] || q.type,
+        grade: gradeLabels[q.grade] || q.grade,
+        difficulty: '★'.repeat(q.difficulty),
+        status: q.status === 'APPROVED' ? '已审核' : q.status === 'PENDING' ? '待审核' : q.status === 'DRAFT' ? '草稿' : '已拒绝',
+        source: q.source || '',
+        year: q.year ? String(q.year) : '',
+        competition: q.competition || '',
+        tagPath,
+        creator: q.createdBy?.name || '',
+        createdAt: q.createdAt.toLocaleString('zh-CN'),
+      });
+    }
 
-    const worksheet = XLSX.utils.json_to_sheet(rows, {
-      header: ['ID', '题干', '答案', '解析', '题型', '年级', '难度', '状态', '来源', '年份', '竞赛', '知识标签', '创建者', '创建时间'],
-    });
-
-    // 设置列宽
-    const colWidths = [
-      { wch: 25 }, { wch: 50 }, { wch: 30 }, { wch: 40 }, { wch: 10 },
-      { wch: 8 }, { wch: 10 }, { wch: 8 }, { wch: 20 }, { wch: 8 },
-      { wch: 15 }, { wch: 40 }, { wch: 10 }, { wch: 20 },
-    ];
-    worksheet['!cols'] = colWidths;
-
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, '题库导出');
-
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = await workbook.xlsx.writeBuffer();
     const date = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
     const fileName = `题库导出_${questions.length}题_${date}.xlsx`;
 

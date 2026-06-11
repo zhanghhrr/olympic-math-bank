@@ -247,7 +247,9 @@ async function requestUploadUrl(
 
     // 从 OSS URL 提取文件 UUID (batch_id 后的 UUID)
     const urlParts = signedUrl.split('/');
-    const fileUuid = urlParts[urlParts.length - 1].split('?')[0].replace('.pdf', '');
+    const lastPart = urlParts[urlParts.length - 1].split('?')[0];
+    // 去掉任意文件扩展名
+    const fileUuid = lastPart.replace(/\.[^.]*$/, '');
 
     console.log(`  [MinerU v4] batch_id: ${batchId}`);
 
@@ -462,6 +464,44 @@ function readContentListJson(extractDir: string): ContentBlock[] | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 清理 MD 中 VLM 模型自动生成的图片描述文本
+ * MinerU VLM 模型会为图片生成 imageCaption/imageFootnote，这些描述会混入 MD 输出，
+ * 导致题目分割引擎将图片描述误认为题目文本。
+ * 利用 content_list.json 中的 imageCaption/imageFootnote 定位并移除这些描述。
+ */
+function cleanImageDescriptions(mdContent: string, blocks: ContentBlock[]): string {
+  const captionsToRemove: string[] = [];
+
+  for (const block of blocks) {
+    if (block.imageCaption && block.imageCaption.length > 0) {
+      for (const caption of block.imageCaption) {
+        const trimmed = caption.trim();
+        if (trimmed.length > 0) captionsToRemove.push(trimmed);
+      }
+    }
+    if (block.imageFootnote && block.imageFootnote.length > 0) {
+      for (const footnote of block.imageFootnote) {
+        const trimmed = footnote.trim();
+        if (trimmed.length > 0) captionsToRemove.push(trimmed);
+      }
+    }
+  }
+
+  if (captionsToRemove.length === 0) return mdContent;
+
+  let cleaned = mdContent;
+  for (const caption of captionsToRemove) {
+    // 转义正则特殊字符
+    const escaped = caption.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // 移除包含描述文本的整行（匹配以该文本开头/结尾的行，含前后空白）
+    cleaned = cleaned.replace(new RegExp(`^\\s*${escaped}\\s*$`, 'gm'), '');
+  }
+
+  console.log(`  [MinerU v4] 清理图片描述: ${captionsToRemove.length} 条`);
+  return cleaned;
 }
 
 // 支持 MinerU 输出的两种 LaTeX 格式: $$...$$ 和 $...$
@@ -752,9 +792,9 @@ function writeCache(hash: string, mdContent: string, contentList: ContentBlock[]
 // ============================================================
 
 /**
- * 使用 MinerU v4 Precision Extract API 处理 PDF
+ * 使用 MinerU v4 Precision Extract API 处理文件（PDF / 图片 / DOCX 等）
  *
- * 缓存：以 PDF SHA256 为 key，命中则跳过 API 调用直接复用已保存的 MD + _content_list
+ * 缓存：以文件 SHA256 为 key，命中则跳过 API 调用直接复用已保存的 MD + _content_list
  *
  * 双策略:
  *   1. 先尝试批量上传 + 自动任务（适合本地文件，无需公开URL）
@@ -787,7 +827,9 @@ export async function processPDF(
         formulas: extractFormulasFromBlocks(cached.contentList),
       };
 
-      const questions = extractQuestions(cached.mdContent, structuredData);
+      // 清理 MD 中的 VLM 图片描述，防止混入题目文本
+      const cleanedMd = cleanImageDescriptions(cached.mdContent, cached.contentList);
+      const questions = extractQuestions(cleanedMd, structuredData);
 
       const elapsed = (Date.now() - startTime) / 1000;
       const pages = new Set(structuredData.blocks.map(b => b.pageIdx)).size;
@@ -796,7 +838,7 @@ export async function processPDF(
 
       return {
         success: true,
-        markdownContent: cached.mdContent,
+        markdownContent: cleanedMd,
         questions,
         structuredData,
         elapsed,
@@ -808,7 +850,9 @@ export async function processPDF(
 
     const safeName = fileName.replace(/[^a-zA-Z0-9\u4e00-\u9fff_.-]/g, '_');
     const ts = Date.now();
-    const uniqueBase = `${ts}-${path.basename(safeName, '.pdf')}`;
+    // 去掉任意文件扩展名（支持 .pdf / .jpg / .png / .webp / .docx / .doc 等）
+    const ext = path.extname(safeName);
+    const uniqueBase = `${ts}-${path.basename(safeName, ext)}`;
 
     const mergedOpts: MinerUOptions = {
       model_version: 'vlm',
@@ -848,7 +892,7 @@ export async function processPDF(
       // 回退: 复制到 public/ 目录（仅生产环境有效）
       const publicDir = path.join(process.cwd(), 'public', 'uploads', 'ocr');
       if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
-      const publicFileName = `${uniqueBase}.pdf`;
+      const publicFileName = `${uniqueBase}${ext}`;
       fs.copyFileSync(filePath, path.join(publicDir, publicFileName));
       publicUrl = `${APP_BASE_URL}/uploads/ocr/${publicFileName}`;
     }
@@ -901,8 +945,11 @@ export async function processPDF(
       writeCache(fileHash, mdContent, structuredData.blocks);
     }
 
+    // 清理 MD 中的 VLM 图片描述，防止混入题目文本
+    const cleanedMd = cleanImageDescriptions(mdContent, structuredData?.blocks ?? []);
+
     // 题目识别
-    const questions = extractQuestions(mdContent, structuredData);
+    const questions = extractQuestions(cleanedMd, structuredData);
 
     // 将图片路径转换为 <uniqueBase>/images/xxx.jpg
     //  确保多份 PDF 的同名图片（如 1.jpg）不会冲突，API 可按目录精确查找
@@ -923,7 +970,7 @@ export async function processPDF(
 
     return {
       success: true,
-      markdownContent: mdContent,
+      markdownContent: cleanedMd,
       questions,
       structuredData: structuredData ?? undefined,
       elapsed,

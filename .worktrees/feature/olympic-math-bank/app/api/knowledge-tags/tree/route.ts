@@ -1,18 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getTagTree } from '@/lib/ocr/tagging';
 
-// 获取知识标签树形结构（带内存缓存）
-export async function GET() {
+// 获取知识标签树形结构（带内存缓存，可指定 namespace）
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const namespace = searchParams.get('namespace') || 'default';
+
     // 复用 tagging 模块的标签树内存缓存
-    const allTags = await getTagTree();
+    const allTags = await getTagTree(namespace);
 
     // 检查孤儿节点（parentId 指向不存在的标签）
     const existingIds = new Set(allTags.map((t: any) => t.id));

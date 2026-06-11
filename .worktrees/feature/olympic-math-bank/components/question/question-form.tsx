@@ -20,7 +20,7 @@ interface QuestionFormProps {
     year: number;
     competition: string;
     tagIds: string[];
-    knowledgeTagIds: string[];
+    knowledgeTagId: string | null;
   }>;
   onFormChange?: (data: any) => void;
 }
@@ -47,7 +47,8 @@ interface KnowledgeTag {
 export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange }: QuestionFormProps) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [knowledgeTree, setKnowledgeTree] = useState<KnowledgeTag[]>([]);
-  const [selectedKnowledgeTags, setSelectedKnowledgeTags] = useState<string[]>([]);
+  const [selectedKnowledgeTag, setSelectedKnowledgeTag] = useState<string | null>(null);
+  const [knowledgeNamespace, setKnowledgeNamespace] = useState('default');
 
   // 级联选择状态
   const [selectedModule, setSelectedModule] = useState<string>('');
@@ -92,7 +93,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
     year: initialData?.year || new Date().getFullYear(),
     competition: initialData?.competition || '',
     tagIds: initialData?.tagIds || [],
-    knowledgeTagIds: initialData?.knowledgeTagIds || [],
+    knowledgeTagId: initialData?.knowledgeTagId || null,
   });
 
   useEffect(() => {
@@ -101,10 +102,10 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
       .then(data => setTags(data.tags || []));
 
     // 加载知识标签树
-    fetch('/api/knowledge-tags/tree')
+    fetch(`/api/knowledge-tags/tree?namespace=${encodeURIComponent(knowledgeNamespace)}`)
       .then(res => res.json())
       .then(data => setKnowledgeTree(data.tree || []));
-  }, []);
+  }, [knowledgeNamespace]);
 
   // 脏状态检测：比较当前 formData 与 initialData
   useEffect(() => {
@@ -118,9 +119,9 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
       formData.difficulty !== (initialData.difficulty || 3) ||
       formData.source !== (initialData.source || '') ||
       JSON.stringify(formData.tagIds) !== JSON.stringify(initialData.tagIds || []) ||
-      JSON.stringify(selectedKnowledgeTags) !== JSON.stringify(initialData.knowledgeTagIds || []);
+      selectedKnowledgeTag !== (initialData.knowledgeTagId || null);
     setIsDirty(dirty);
-  }, [formData, selectedKnowledgeTags, initialData]);
+  }, [formData, selectedKnowledgeTag, initialData]);
 
   // 离开确认：有未保存更改时提示用户
   useEffect(() => {
@@ -132,14 +133,13 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
     return () => window.removeEventListener('beforeunload', handler);
   }, [isDirty]);
 
-  // 初始化已选知识标签（编辑时从 initialData 加载）
+  // 初始化已选知识标签（编辑时从 initialData 加载，单选）
   useEffect(() => {
-    if (initialData?.knowledgeTagIds && initialData.knowledgeTagIds.length > 0) {
-      setSelectedKnowledgeTags(initialData.knowledgeTagIds);
+    if (initialData?.knowledgeTagId) {
+      setSelectedKnowledgeTag(initialData.knowledgeTagId);
       
       // 根据已选标签自动展开级联选择器
-      // 找到最深层的标签ID
-      const deepestTagId = initialData.knowledgeTagIds[initialData.knowledgeTagIds.length - 1];
+      const targetId = initialData.knowledgeTagId;
       
       // 在树中查找该标签的完整路径
       const findTagPath = (nodes: KnowledgeTag[], targetId: string, path: string[] = []): string[] | null => {
@@ -156,7 +156,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
         return null;
       };
       
-      const tagPath = findTagPath(knowledgeTree, deepestTagId);
+      const tagPath = findTagPath(knowledgeTree, targetId);
       if (tagPath && tagPath.length >= 1) {
         setSelectedModule(tagPath[0] || '');
         if (tagPath.length >= 2) setSelectedTopic(tagPath[1]);
@@ -165,13 +165,13 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
         if (tagPath.length >= 5) setSelectedSkill(tagPath[4]);
       }
     }
-  }, [initialData?.knowledgeTagIds, knowledgeTree]);
+  }, [initialData?.knowledgeTagId, knowledgeTree]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmit({
       ...formData,
-      knowledgeTagIds: selectedKnowledgeTags,
+      knowledgeTagId: selectedKnowledgeTag,
     });
   };
 
@@ -310,9 +310,19 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
 
         {/* 五级知识标签选择 */}
         <div className="border border-border rounded-xl p-5 bg-white shadow-sm">
-          <label className="block text-sm font-medium text-foreground mb-3">
-            知识标签（五级）
-          </label>
+          <div className="flex items-center justify-between mb-3">
+            <label className="text-sm font-medium text-foreground">
+              知识标签（五级）
+            </label>
+            <select
+              value={knowledgeNamespace}
+              onChange={(e) => { setKnowledgeNamespace(e.target.value); setSelectedKnowledgeTag(null); }}
+              className="select-field text-sm w-28"
+            >
+              <option value="default">系统标签</option>
+              <option value="散测入学">散测标签</option>
+            </select>
+          </div>
 
           {/* 最近使用的标签 */}
           {recentTags.length > 0 && (
@@ -324,15 +334,15 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                     key={rt.id}
                     type="button"
                     className={`text-xs px-2 py-0.5 rounded-lg border transition-colors ${
-                      selectedKnowledgeTags.includes(rt.id)
+                      selectedKnowledgeTag === rt.id
                         ? 'bg-primary/10 border-primary text-primary'
                         : 'border-border hover:bg-muted text-muted-foreground'
                     }`}
                     onClick={() => {
-                      if (selectedKnowledgeTags.includes(rt.id)) {
-                        setSelectedKnowledgeTags(selectedKnowledgeTags.filter(id => id !== rt.id));
+                      if (selectedKnowledgeTag === rt.id) {
+                        setSelectedKnowledgeTag(null);
                       } else {
-                        setSelectedKnowledgeTags([...selectedKnowledgeTags, rt.id]);
+                        setSelectedKnowledgeTag(rt.id);
                         addTagToRecent(rt);
                       }
                     }}
@@ -387,15 +397,15 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                     <div
                       key={r.id}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors ${
-                        selectedKnowledgeTags.includes(r.id)
+                        selectedKnowledgeTag === r.id
                           ? 'bg-primary/10 text-primary'
                           : 'hover:bg-muted text-foreground'
                       }`}
                       onClick={() => {
-                        if (selectedKnowledgeTags.includes(r.id)) {
-                          setSelectedKnowledgeTags(selectedKnowledgeTags.filter(id => id !== r.id));
+                        if (selectedKnowledgeTag === r.id) {
+                          setSelectedKnowledgeTag(null);
                         } else {
-                          setSelectedKnowledgeTags([...selectedKnowledgeTags, r.id]);
+                          setSelectedKnowledgeTag(r.id);
                           addTagToRecent({ id: r.id, name: r.name, path: r.path });
                         }
                       }}
@@ -403,7 +413,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                       <span className="badge badge-draft text-[10px]">L{r.level}</span>
                       <span className="flex-1">{r.name}</span>
                       <span className="text-muted-foreground text-xs truncate max-w-[200px]">{r.path}</span>
-                      {selectedKnowledgeTags.includes(r.id) && '✓'}
+                      {selectedKnowledgeTag === r.id && '✓'}
                     </div>
                   ));
                 })()}
@@ -429,8 +439,8 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                 setSelectedKnowledge('');
                 setSelectedSkill('');
                 // 自动添加到已选标签
-                if (val && !selectedKnowledgeTags.includes(val)) {
-                  setSelectedKnowledgeTags([...selectedKnowledgeTags, val]);
+                if (val) {
+                  setSelectedKnowledgeTag(val);
                 }
               }}
               className="select-field select-field-full"
@@ -454,9 +464,9 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                   setSelectedSubtopic('');
                   setSelectedKnowledge('');
                   setSelectedSkill('');
-                  // 自动添加到已选标签
-                  if (val && !selectedKnowledgeTags.includes(val)) {
-                    setSelectedKnowledgeTags([...selectedKnowledgeTags, val]);
+                  // 二级自动设置
+                  if (val) {
+                    setSelectedKnowledgeTag(val);
                   }
                 }}
                 className="select-field select-field-full"
@@ -480,9 +490,9 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                   setSelectedSubtopic(val);
                   setSelectedKnowledge('');
                   setSelectedSkill('');
-                  // 自动添加到已选标签
-                  if (val && !selectedKnowledgeTags.includes(val)) {
-                    setSelectedKnowledgeTags([...selectedKnowledgeTags, val]);
+                  // 三级自动设置
+                  if (val) {
+                    setSelectedKnowledgeTag(val);
                   }
                 }}
                 className="select-field select-field-full"
@@ -508,9 +518,9 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                   const val = e.target.value;
                   setSelectedKnowledge(val);
                   setSelectedSkill('');
-                  // 自动添加到已选标签
-                  if (val && !selectedKnowledgeTags.includes(val)) {
-                    setSelectedKnowledgeTags([...selectedKnowledgeTags, val]);
+                  // 四级自动设置
+                  if (val) {
+                    setSelectedKnowledgeTag(val);
                   }
                 }}
                 className="select-field select-field-full"
@@ -536,9 +546,9 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                 onChange={e => {
                   const val = e.target.value;
                   setSelectedSkill(val);
-                  // 自动添加到已选标签
-                  if (val && !selectedKnowledgeTags.includes(val)) {
-                    setSelectedKnowledgeTags([...selectedKnowledgeTags, val]);
+                  // 五级自动设置
+                  if (val) {
+                    setSelectedKnowledgeTag(val);
                   }
                 }}
                 className="select-field select-field-full"
@@ -568,7 +578,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                 setSelectedSubtopic('');
                 setSelectedKnowledge('');
                 setSelectedSkill('');
-                setSelectedKnowledgeTags([]);
+                setSelectedKnowledgeTag(null);
               }}
               className="text-muted-foreground hover:text-foreground"
             >
@@ -577,11 +587,11 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
           </div>
 
           {/* 已选标签 */}
-          {selectedKnowledgeTags.length > 0 && (
+          {selectedKnowledgeTag && (
             <div className="mt-3">
               <label className="block text-xs text-muted-foreground mb-1">已选知识标签：</label>
               <div className="flex flex-wrap gap-2">
-                {selectedKnowledgeTags.map(tagId => {
+                {(() => {
                   const findTag = (tree: KnowledgeTag[], id: string): KnowledgeTag | undefined => {
                     for (const node of tree) {
                       if (node.id === id) return node;
@@ -592,20 +602,20 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                     }
                     return undefined;
                   };
-                  const tag = findTag(knowledgeTree, tagId);
+                  const tag = findTag(knowledgeTree, selectedKnowledgeTag);
                   return tag ? (
-                    <span key={tagId} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary text-xs rounded-full">
+                    <span key={selectedKnowledgeTag} className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary text-xs rounded-full">
                       {tag.name}
                       <button
                         type="button"
-                        onClick={() => setSelectedKnowledgeTags(selectedKnowledgeTags.filter(id => id !== tagId))}
+                        onClick={() => setSelectedKnowledgeTag(null)}
                         className="hover:text-primary/80"
                       >
                         <X className="w-3 h-3" />
                       </button>
                     </span>
                   ) : null;
-                })}
+                })()}
               </div>
             </div>
           )}
@@ -660,7 +670,7 @@ export function QuestionForm({ onSubmit, isSubmitting, initialData, onFormChange
                 year: formData.year,
                 competition: formData.competition,
                 tagIds: formData.tagIds,
-                knowledgeTagIds: selectedKnowledgeTags,
+                knowledgeTagId: selectedKnowledgeTag,
                 __stay: true,
               };
               onSubmit(data as any);

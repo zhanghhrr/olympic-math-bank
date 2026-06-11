@@ -2,15 +2,20 @@ import { prisma } from '@/lib/db/prisma';
 import { knowledgeKeywords, sectionTitleToTagNames, annotationToTagNames } from './knowledge-keywords';
 import { isLLMAvailable, matchTagsViaLLM } from '@/lib/llm/client';
 
-let tagTreeCache: any[] | null = null;
+const tagTreeCache: Map<string, any[]> = new Map();
 
-export function clearTagTreeCache() {
-  tagTreeCache = null;
+export function clearTagTreeCache(namespace?: string) {
+  if (namespace) {
+    tagTreeCache.delete(namespace);
+  } else {
+    tagTreeCache.clear();
+  }
 }
 
-export async function getTagTree() {
-  if (!tagTreeCache) {
-    tagTreeCache = await prisma.knowledgeTag.findMany({
+export async function getTagTree(namespace: string = 'default') {
+  if (!tagTreeCache.has(namespace)) {
+    const tags = await prisma.knowledgeTag.findMany({
+      where: { namespace },
       include: {
         parent: {
           include: {
@@ -25,8 +30,9 @@ export async function getTagTree() {
         },
       },
     });
+    tagTreeCache.set(namespace, tags);
   }
-  return tagTreeCache;
+  return tagTreeCache.get(namespace)!;
 }
 
 function isSingleCJK(keyword: string): boolean {
@@ -222,64 +228,20 @@ function deduplicateByBranch(matches: TagMatchResult[], maxTop: number): TagMatc
 export async function autoMatchKnowledgeTags(
   content: string,
   title?: string
-): Promise<string[]> {
-  const allTags = await getTagTree();
-  const matchedScores: TagMatchResult[] = [];
-
-  for (const tag of allTags) {
-    const score = calculateTagScore(content, tag, title ? { title } : undefined);
-    if (score > 0) {
-      matchedScores.push({
-        tagId: tag.id,
-        tagName: tag.name,
-        score,
-        level: tag.level,
-        tag,
-        path: getTagFullPath(tag),
-      });
-    }
-  }
-
-  const topMatches = deduplicateByBranch(
-    matchedScores.filter(m => m.score > 0),
-    5
-  );
-
-  if (topMatches.length === 0) {
-    return [];
-  }
-
-  const resultIds: string[] = [];
-  const seenIds = new Set<string>();
-
-  for (const match of topMatches) {
-    const tagWithParents = getTagAndParentIds(match.tag);
-    for (const id of tagWithParents) {
-      if (!seenIds.has(id)) {
-        seenIds.add(id);
-        resultIds.push(id);
-      }
-    }
-  }
-
-  return resultIds;
+): Promise<string | null> {
+  const result = await autoMatchKnowledgeTagsWithScores(content, title);
+  return result.bestTagId;
 }
 
 const LLM_FALLBACK_THRESHOLD = 3;
 
-function scoredToTagIds(topMatches: TagMatchResult[]): string[] {
-  const resultIds: string[] = [];
-  const seenIds = new Set<string>();
-  for (const match of topMatches) {
-    const ids = getTagAndParentIds(match.tag);
-    for (const id of ids) {
-      if (!seenIds.has(id)) {
-        seenIds.add(id);
-        resultIds.push(id);
-      }
-    }
-  }
-  return resultIds;
+/** 从匹配结果中取最高分的单个标签ID */
+function getBestTagId(topMatches: TagMatchResult[]): string | null {
+  if (topMatches.length === 0) return null;
+  // 取最高分且层级最深（>=3，即子专题及以上）的标签
+  const leafMatches = topMatches.filter(m => m.level >= 3);
+  const best = leafMatches.length > 0 ? leafMatches[0] : topMatches[0];
+  return best?.tagId ?? null;
 }
 
 export interface ScoredTag {
@@ -309,15 +271,15 @@ function classifyMatchSource(tagName: string, title?: string): ScoredTag['matchS
 export async function autoMatchKnowledgeTagsWithLLM(
   content: string,
   title?: string
-): Promise<string[]> {
+): Promise<string | null> {
   const result = await autoMatchKnowledgeTagsWithScores(content, title);
-  return result.tagIds;
+  return result.bestTagId;
 }
 
 export async function autoMatchKnowledgeTagsWithScores(
   content: string,
   title?: string
-): Promise<{ tagIds: string[]; scoredTags: ScoredTag[] }> {
+): Promise<{ bestTagId: string | null; scoredTags: ScoredTag[] }> {
   const allTags = await getTagTree();
   const searchText = (title ? title + ' ' : '') + content;
   const matchedScores: TagMatchResult[] = [];
@@ -337,7 +299,7 @@ export async function autoMatchKnowledgeTagsWithScores(
   }
 
   if (matchedScores.length === 0) {
-    return { tagIds: [], scoredTags: [] };
+    return { bestTagId: null, scoredTags: [] };
   }
 
   const sortedByScore = [...matchedScores].sort((a, b) => b.score - a.score);
@@ -360,7 +322,7 @@ export async function autoMatchKnowledgeTagsWithScores(
     || (!hasEnoughStable && minLeafScore < LLM_FALLBACK_THRESHOLD);
 
   if (!needsLLM || !isLLMAvailable()) {
-    const tagIds = scoredToTagIds(topMatches);
+    const bestTagId = getBestTagId(topMatches);
     const scoredTags: ScoredTag[] = topMatches.map(m => ({
       tagId: m.tagId,
       tagName: m.tagName,
@@ -369,7 +331,7 @@ export async function autoMatchKnowledgeTagsWithScores(
       level: m.level,
       matchSource: classifyMatchSource(m.tagName, title),
     }));
-    return { tagIds, scoredTags };
+    return { bestTagId, scoredTags };
   }
 
   const llmAddedTagNames = new Set<string>();
@@ -397,10 +359,10 @@ export async function autoMatchKnowledgeTagsWithScores(
     console.warn('[Tagging] LLM 兜底失败，回退到静态匹配:', (err as Error).message);
   }
 
-  const tagIds = scoredToTagIds(topMatches);
+  const bestTagId = getBestTagId(topMatches);
   const scoredTags: ScoredTag[] = topMatches.map(m => ({
     tagId: m.tagId, tagName: m.tagName, score: m.score, path: m.path, level: m.level,
     matchSource: llmAddedTagNames.has(m.tagName) ? 'llm' : classifyMatchSource(m.tagName, title),
   }));
-  return { tagIds, scoredTags };
+  return { bestTagId, scoredTags };
 }

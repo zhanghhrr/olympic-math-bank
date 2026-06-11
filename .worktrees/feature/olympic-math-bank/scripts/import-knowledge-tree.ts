@@ -29,7 +29,11 @@ async function importKnowledgeTree() {
 
     // 在事务中清空并重新导入，防止中途崩溃导致数据丢失
     await prisma.$transaction(async (tx) => {
-      await tx.questionKnowledgeTag.deleteMany();
+      // 先解除题目对知识标签的引用（改为直接 knowledgeTagId 字段后，需先置空）
+      await tx.question.updateMany({
+        where: { knowledgeTagId: { not: null } },
+        data: { knowledgeTagId: null },
+      });
       await tx.knowledgeTag.deleteMany();
       console.log('已清空现有知识标签');
     });
@@ -98,6 +102,7 @@ async function importKnowledgeTree() {
             level: level,
             name: currentName,
             code: currentCode,
+            namespace: 'default',
             module: moduleName,
             topic: topicName,
             subtopic: subtopicName,

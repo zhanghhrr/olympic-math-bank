@@ -58,6 +58,7 @@ export function Sidebar({ user }: { user: any }) {
             <Link
               key={item.name}
               href={item.href}
+              prefetch={false}
               className={cn(
                 'flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
                 isActive
@@ -79,7 +80,7 @@ export function Sidebar({ user }: { user: any }) {
             {user?.name || '用户'}
           </p>
           <p className="text-xs text-muted-foreground truncate">
-            {user?.email}
+            {user?.phone}
           </p>
         </div>
         <button

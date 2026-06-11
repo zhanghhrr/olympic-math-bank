@@ -2,6 +2,15 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import katex from 'katex';
+import { LATEX_MACROS } from '@/lib/latex/macros';
+
+/** KaTeX 渲染共享配置（编辑器预览用，不注入 \displaystyle） */
+const EDITOR_KATEX_OPTIONS: Omit<katex.KatexOptions, 'displayMode'> = {
+  throwOnError: false,
+  strict: false,
+  macros: LATEX_MACROS,
+  trust: true,
+};
 import { LatexToolbar } from './LatexToolbar';
 
 // ============ 类型定义 ============
@@ -223,7 +232,7 @@ function segmentsToMarkdown(segments: Segment[]): string {
 // 渲染 LaTeX 为 HTML
 function renderLatex(latex: string, displayMode: boolean): string {
   try {
-    return katex.renderToString(latex.trim(), { displayMode, throwOnError: false });
+    return katex.renderToString(latex.trim(), { ...EDITOR_KATEX_OPTIONS, displayMode });
   } catch {
     return displayMode ? `$$${latex}$$` : `$${latex}$`;
   }

@@ -55,7 +55,7 @@ export default async function DashboardPage() {
               欢迎回来
             </h2>
             <p className="text-muted-foreground mt-1">
-              {session?.user?.name || session?.user?.email}
+              {session?.user?.name || '用户'}
             </p>
           </div>
           <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/5 border border-primary/10">

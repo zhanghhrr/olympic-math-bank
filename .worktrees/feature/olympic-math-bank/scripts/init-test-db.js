@@ -15,46 +15,46 @@ async function main() {
   console.log('Initializing test database...');
 
   // 创建默认管理员用户
-  const adminPassword = await bcrypt.hash('admin123', 10);
+  const adminPassword = await bcrypt.hash('2000331', 10);
   const admin = await prisma.user.upsert({
-    where: { email: 'admin@example.com' },
+    where: { phone: '13704592025' },
     update: {},
     create: {
-      email: 'admin@example.com',
+      phone: '13704592025',
       name: '管理员',
       role: 'ADMIN',
       password: adminPassword,
     },
   });
-  console.log('Created admin user:', admin.email);
+  console.log('Created admin user:', admin.phone);
 
-  // 创建测试教研员
+  // 测试教研员（稍后配置）
   const editorPassword = await bcrypt.hash('editor123', 10);
   const editor = await prisma.user.upsert({
-    where: { email: 'editor@example.com' },
+    where: { phone: 'editor_placeholder' },
     update: {},
     create: {
-      email: 'editor@example.com',
+      phone: 'editor_placeholder',
       name: '测试教研员',
       role: 'EDITOR',
       password: editorPassword,
     },
   });
-  console.log('Created editor user:', editor.email);
+  console.log('Created editor user:', editor.phone);
 
-  // 创建测试审核员
+  // 测试审核员（稍后配置）
   const reviewerPassword = await bcrypt.hash('reviewer123', 10);
   const reviewer = await prisma.user.upsert({
-    where: { email: 'reviewer@example.com' },
+    where: { phone: 'reviewer_placeholder' },
     update: {},
     create: {
-      email: 'reviewer@example.com',
+      phone: 'reviewer_placeholder',
       name: '测试审核员',
       role: 'REVIEWER',
       password: reviewerPassword,
     },
   });
-  console.log('Created reviewer user:', reviewer.email);
+  console.log('Created reviewer user:', reviewer.phone);
 
   console.log('Test database initialized successfully');
 }

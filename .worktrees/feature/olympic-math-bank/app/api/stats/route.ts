@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db/prisma';
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
@@ -44,15 +44,17 @@ export async function GET(request: NextRequest) {
         orderBy: { difficulty: 'asc' },
       }),
 
-      prisma.questionKnowledgeTag.findMany({
+      prisma.question.findMany({
         select: {
           knowledgeTag: {
             select: { id: true, name: true, module: true, topic: true },
           },
         },
+        where: { knowledgeTagId: { not: null } },
       }).then(rows => {
         const countMap = new Map<string, { id: string; name: string; module: string | null; count: number }>();
         for (const row of rows) {
+          if (!row.knowledgeTag) continue;
           const tag = row.knowledgeTag;
           if (!countMap.has(tag.id)) {
             countMap.set(tag.id, { id: tag.id, name: tag.name, module: tag.module, count: 0 });

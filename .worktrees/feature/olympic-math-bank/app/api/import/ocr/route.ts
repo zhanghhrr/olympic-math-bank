@@ -5,13 +5,27 @@ import { processPDF } from '@/lib/ocr/mineru-client';
 import { prisma } from '@/lib/db/prisma';
 import { autoMatchKnowledgeTagsWithScores, getTagTree, type ScoredTag } from '@/lib/ocr/tagging';
 import { inferGrade, estimateDifficulty } from '@/lib/ocr/import-to-db';
+import { OCR_CONFIG } from '@/lib/ocr/config';
+import { convertToPdf } from '@/lib/ocr/docx-converter';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/** 判断是否为 DOCX/DOC 格式 */
+function isDocxFormat(fileName: string): boolean {
+  const ext = path.extname(fileName).toLowerCase();
+  return ['.docx', '.doc'].includes(ext);
+}
+
+/** 判断是否为图片格式 */
+function isImageFormat(fileName: string): boolean {
+  const ext = path.extname(fileName).toLowerCase();
+  return ['.jpg', '.jpeg', '.png', '.webp'].includes(ext);
+}
 
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
@@ -33,7 +47,19 @@ export async function POST(request: NextRequest) {
     const filePath = path.join(outputDir, `${timestamp}-${safeName}`);
     fs.writeFileSync(filePath, buffer);
 
-    const result = await processPDF(filePath, outputDir);
+    // DOCX/DOC 先转换为 PDF
+    let ocrFilePath = filePath;
+    if (isDocxFormat(file.name)) {
+      console.log(`[Import OCR] 检测到 DOCX 文件，尝试转换为 PDF...`);
+      const pdfPath = await convertToPdf(filePath);
+      if (pdfPath) {
+        ocrFilePath = pdfPath;
+      } else {
+        console.log(`[Import OCR] DOCX 转换失败，尝试直接提交到 MinerU`);
+      }
+    }
+
+    const result = await processPDF(ocrFilePath, outputDir);
 
     if (!result.success) {
       return NextResponse.json({ error: result.error || 'OCR 识别失败' }, { status: 500 });
@@ -46,11 +72,12 @@ export async function POST(request: NextRequest) {
 
     const questions = await Promise.all(
       (result.questions || []).map(async (q, idx) => {
-        const matchResult = await autoMatchKnowledgeTagsWithScores(q.content, q.title).catch(() => ({ tagIds: [], scoredTags: [] as ScoredTag[] }));
-        const { tagIds, scoredTags } = matchResult;
+        const matchResult = await autoMatchKnowledgeTagsWithScores(q.content, q.title).catch(() => ({ bestTagId: null, scoredTags: [] as ScoredTag[] }));
+        const { bestTagId, scoredTags } = matchResult;
 
         let matchedTags: Array<{ id: string; name: string; path: string; score: number; matchSource: string }> = [];
-        if (tagIds.length > 0) {
+        if (scoredTags.length > 0) {
+          const tagIds = scoredTags.map(s => s.tagId);
           const tags = await prisma.knowledgeTag.findMany({
             where: { id: { in: tagIds } },
             select: { id: true, name: true, module: true, topic: true, subtopic: true, knowledge: true, skill: true },
@@ -106,7 +133,7 @@ export async function POST(request: NextRequest) {
       }),
     );
 
-    // 将上传的 PDF 复制到 public 目录，供前端 iframe 预览
+    // 将上传的文件复制到 public 目录，供前端 iframe 预览（仅 PDF）
     const publicDir = path.join(process.cwd(), 'public', 'uploads', 'ocr');
     if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
     const publicFileName = `${timestamp}-${safeName}`;
@@ -114,7 +141,9 @@ export async function POST(request: NextRequest) {
     if (!fs.existsSync(publicFilePath)) {
       fs.copyFileSync(filePath, publicFilePath);
     }
-    const pdfUrl = `/uploads/ocr/${publicFileName}`;
+    const pdfUrl = (!isImageFormat(file.name) && !isDocxFormat(file.name))
+      ? `/uploads/ocr/${publicFileName}`
+      : null;
 
     return NextResponse.json({
       success: true,

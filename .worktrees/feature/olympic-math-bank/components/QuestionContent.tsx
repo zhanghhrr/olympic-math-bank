@@ -1,57 +1,13 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import katex from 'katex';
 import { useImageUrl } from '@/hooks/useImageUrl';
 import { ImageModal } from './ImageModal';
+import { renderLatexToHtml } from '@/lib/latex/renderer';
 
 interface QuestionContentProps {
   content: string;
   className?: string;
-}
-
-// 渲染 LaTeX 公式并返回 HTML
-function renderLatexToHtml(text: string): string {
-  if (!text) return text;
-
-  // 行内公式：$$...$$
-  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-    } catch {
-      return `$$${latex}$$`;
-    }
-  });
-
-  // 块级公式：\[...\]
-  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: true, throwOnError: false });
-    } catch {
-      return `\\[${latex}\\]`;
-    }
-  });
-
-  // 行内公式：\(...\)，注意 \) 是转义的右括号
-  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-    } catch {
-      return `\\(${latex}\\)`;
-    }
-  });
-
-  // 行内公式：$...$
-  text = text.replace(/\$([^$\n]+?)\$/g, (_, latex) => {
-    try {
-      return katex.renderToString(latex.trim(), { displayMode: false, throwOnError: false });
-    } catch {
-      return `$${latex}$`;
-    }
-  });
-
-  // 将换行符转为 <br>，确保行内公式之间的换行不被 HTML 空白折叠
-  return text.replace(/\n/g, '<br>');
 }
 
 // 对齐块类型

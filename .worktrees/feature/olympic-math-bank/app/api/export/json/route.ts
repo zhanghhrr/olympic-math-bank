@@ -5,7 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
 
@@ -20,18 +20,14 @@ export async function POST(request: NextRequest) {
     const questions = await prisma.question.findMany({
       where: { id: { in: questionIds } },
       include: {
-        knowledgeTags: {
+        knowledgeTag: {
           include: {
-            knowledgeTag: {
+            parent: {
               include: {
                 parent: {
                   include: {
                     parent: {
-                      include: {
-                        parent: {
-                          include: { parent: true },
-                        },
-                      },
+                      include: { parent: true },
                     },
                   },
                 },
@@ -45,16 +41,16 @@ export async function POST(request: NextRequest) {
     });
 
     const exportData = questions.map(q => {
-      const tagPaths = q.knowledgeTags.map(kt => {
-        const tag = kt.knowledgeTag;
+      const tagPath = (() => {
+        if (!q.knowledgeTag) return '';
         const parts: string[] = [];
-        let current: any = tag;
+        let current: any = q.knowledgeTag;
         while (current) {
           parts.unshift(current.name);
           current = current.parent;
         }
         return parts.join(' > ');
-      });
+      })();
 
       return {
         id: q.id,
@@ -68,7 +64,7 @@ export async function POST(request: NextRequest) {
         source: q.source,
         year: q.year,
         competition: q.competition,
-        tags: tagPaths,
+        knowledgeTags: tagPath,
         formulas: q.formulas ? JSON.parse(q.formulas) : null,
         createdBy: q.createdBy?.name || '未知',
         createdAt: q.createdAt,

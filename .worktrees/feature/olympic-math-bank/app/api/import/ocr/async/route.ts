@@ -6,13 +6,42 @@ import { ImportStatus } from '@prisma/client';
 import { processPDF } from '@/lib/ocr/mineru-client';
 import { autoMatchKnowledgeTagsWithScores, getTagTree, type ScoredTag } from '@/lib/ocr/tagging';
 import { inferGrade, estimateDifficulty } from '@/lib/ocr/import-to-db';
+import { OCR_CONFIG } from '@/lib/ocr/config';
+import { convertToPdf } from '@/lib/ocr/docx-converter';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/** 根据文件扩展名推断 MIME 类型 */
+function getMimeType(fileName: string): string {
+  const ext = path.extname(fileName).toLowerCase();
+  const map: Record<string, string> = {
+    '.pdf': 'application/pdf',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.webp': 'image/webp',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword',
+  };
+  return map[ext] || '';
+}
+
+/** 判断是否为图片格式 */
+function isImageFormat(fileName: string): boolean {
+  const ext = path.extname(fileName).toLowerCase();
+  return ['.jpg', '.jpeg', '.png', '.webp'].includes(ext);
+}
+
+/** 判断是否为 DOCX/DOC 格式 */
+function isDocxFormat(fileName: string): boolean {
+  const ext = path.extname(fileName).toLowerCase();
+  return ['.docx', '.doc'].includes(ext);
+}
 
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
@@ -24,24 +53,22 @@ export async function POST(request: NextRequest) {
     }
 
     // 获取用户 ID
-    const sessionUserId = (session.user as any)?.id as string | undefined;
-    let userId = sessionUserId;
+    const userId = (session.user as any)?.id as string;
     if (!userId) {
-      const defaultUser = await prisma.user.findFirst({
-        where: { email: session.user.email },
-      });
-      userId = defaultUser?.id;
-      if (!userId) {
-        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
-      }
+      return NextResponse.json({ error: '用户不存在' }, { status: 401 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 验证文件为合法的 PDF（magic bytes: %PDF-）
-    const pdfMagic = buffer.slice(0, 5).toString('ascii');
-    if (pdfMagic !== '%PDF-') {
-      return NextResponse.json({ error: '上传的文件不是有效的 PDF 格式' }, { status: 400 });
+    // 验证文件格式（基于扩展名 + MIME 类型双重校验）
+    const mimeType = getMimeType(file.name);
+    if (!mimeType || !OCR_CONFIG.supportedFormats.includes(mimeType)) {
+      // 回退：简单的扩展名检查
+      const ext = path.extname(file.name).toLowerCase();
+      const supportedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.docx', '.doc'];
+      if (!supportedExts.includes(ext)) {
+        return NextResponse.json({ error: `不支持的文件格式: ${file.name}` }, { status: 400 });
+      }
     }
 
     const outputDir = path.join(process.cwd(), 'uploads', 'ocr');
@@ -49,12 +76,25 @@ export async function POST(request: NextRequest) {
 
     const timestamp = Date.now();
     const safeName = file.name.replace(/[^a-zA-Z0-9\u4e00-\u9fff._-]/g, '_');
-    const filePath = path.join(outputDir, `${timestamp}-${safeName}`);
+    let filePath = path.join(outputDir, `${timestamp}-${safeName}`);
     fs.writeFileSync(filePath, buffer);
+
+    // DOCX/DOC 先转换为 PDF
+    let ocrFilePath = filePath;
+    if (isDocxFormat(file.name)) {
+      console.log(`[Async OCR API] 检测到 DOCX 文件，尝试转换为 PDF...`);
+      const pdfPath = await convertToPdf(filePath);
+      if (pdfPath) {
+        ocrFilePath = pdfPath;
+        console.log(`[Async OCR API] DOCX → PDF 转换成功: ${ocrFilePath}`);
+      } else {
+        console.log(`[Async OCR API] DOCX 转换失败，尝试直接提交到 MinerU`);
+      }
+    }
 
     const job = await prisma.importJob.create({
       data: {
-        type: 'PDF',
+        type: isDocxFormat(file.name) ? 'DOCX' : isImageFormat(file.name) ? 'IMAGE' : 'PDF',
         fileUrl: filePath,
         fileName: file.name,
         status: 'PROCESSING',
@@ -63,7 +103,8 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 将 PDF 复制到 public 目录供前端预览
+    // 将原始文件复制到 public 目录供前端预览（仅 PDF 可预览）
+    let pdfUrl: string | null = null;
     const publicDir = path.join(process.cwd(), 'public', 'uploads', 'ocr');
     if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
     const publicFileName = `${timestamp}-${safeName}`;
@@ -71,10 +112,13 @@ export async function POST(request: NextRequest) {
     if (!fs.existsSync(publicFilePath)) {
       fs.copyFileSync(filePath, publicFilePath);
     }
-    const pdfUrl = `/uploads/ocr/${publicFileName}`;
+    // 仅 PDF 提供 iframe 预览链接
+    if (!isImageFormat(file.name) && !isDocxFormat(file.name)) {
+      pdfUrl = `/uploads/ocr/${publicFileName}`;
+    }
 
-    // 后台处理
-    processJobAsync(job.id, filePath, outputDir, file.name);
+    // 后台处理（使用 ocrFilePath，对 DOCX 可能是转换后的 PDF）
+    processJobAsync(job.id, ocrFilePath, outputDir, file.name);
 
     return NextResponse.json({
       jobId: job.id,
@@ -91,7 +135,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
@@ -207,11 +251,12 @@ async function processJobAsync(
       
       const batchResults = await Promise.allSettled(
         batch.map(async (q) => {
-          const matchResult = await autoMatchKnowledgeTagsWithScores(q.content, q.title).catch(() => ({ tagIds: [], scoredTags: [] as ScoredTag[] }));
-          const { tagIds, scoredTags } = matchResult;
+          const matchResult = await autoMatchKnowledgeTagsWithScores(q.content, q.title).catch(() => ({ bestTagId: null, scoredTags: [] as ScoredTag[] }));
+          const { scoredTags } = matchResult;
 
           let matchedTags: Array<{ id: string; name: string; path: string; score: number; matchSource: string }> = [];
-          if (tagIds.length > 0) {
+          if (scoredTags.length > 0) {
+            const tagIds = scoredTags.map(s => s.tagId);
             const tags = await prisma.knowledgeTag.findMany({
               where: { id: { in: tagIds } },
               select: { id: true, name: true, module: true, topic: true, subtopic: true, knowledge: true, skill: true },

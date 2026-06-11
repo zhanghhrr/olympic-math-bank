@@ -5,11 +5,11 @@
  * 支持单题导出和批量导出。
  */
 
-import type { Question, QuestionKnowledgeTag, KnowledgeTag } from '@prisma/client';
+import type { Question, KnowledgeTag } from '@prisma/client';
 import { QuestionType, Grade, QuestionStatus } from '@prisma/client';
 
 export type QuestionWithTags = Question & {
-  knowledgeTags: (QuestionKnowledgeTag & { knowledgeTag: KnowledgeTag })[];
+  knowledgeTag: KnowledgeTag | null;
 };
 
 const TYPE_CN: Record<QuestionType, string> = {
@@ -54,17 +54,11 @@ function buildTagPath(tag: KnowledgeTag): string {
     .join(' > ');
 }
 
+// 保留兼容函数，但简化为单标签版本
 function buildTagTree(tags: KnowledgeTag[]): string[] {
-  const paths: string[] = [];
-  const seen = new Set<string>();
-  for (const tag of tags) {
-    const path = buildTagPath(tag);
-    if (!seen.has(path)) {
-      seen.add(path);
-      paths.push(path);
-    }
-  }
-  return paths;
+  if (tags.length === 0) return [];
+  const path = buildTagPath(tags[0]);
+  return path ? [path] : [];
 }
 
 function formatOptions(optionsStr: string | null): string {
@@ -100,14 +94,9 @@ export function renderQuestionToMd(q: QuestionWithTags, index?: number): string 
   if (q.competition) lines.push(`- **竞赛**: ${q.competition}`);
   if (q.sourcePdfName) lines.push(`- **原始PDF**: ${q.sourcePdfName}`);
 
-  const tagPaths = q.knowledgeTags
-    ? buildTagTree(q.knowledgeTags.map(kt => kt.knowledgeTag))
-    : [];
-  if (tagPaths.length > 0) {
-    lines.push(`- **知识标签**:`);
-    for (const p of tagPaths) {
-      lines.push(`  - ${p}`);
-    }
+  const tagPath = q.knowledgeTag ? buildTagPath(q.knowledgeTag) : null;
+  if (tagPath) {
+    lines.push(`- **知识标签**: ${tagPath}`);
   }
 
   lines.push(`- **创建时间**: ${fmtDate(new Date(q.createdAt))}`);

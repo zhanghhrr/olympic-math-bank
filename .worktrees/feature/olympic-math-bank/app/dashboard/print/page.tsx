@@ -85,53 +85,63 @@ function PrintPageContent() {
     }, 100);
   };
 
-  const [isDownloading, setIsDownloading] = useState(false);
+  // 异步轮询 PDF 导出状态（仿教研云方案）
+  const [exportStatus, setExportStatus] = useState<'idle' | 'creating' | 'polling' | 'downloading' | 'done' | 'error'>('idle');
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const handleDownloadPdf = async () => {
-    setIsDownloading(true);
+    setExportStatus('creating');
+    setExportError(null);
     try {
-      const payload = {
-        blocks: blocks.map((b) => {
-          if (b.type === 'QUESTION' && b.question) {
-            return {
-              id: b.id,
-              type: b.type,
-              question: {
-                id: b.question.id,
-                content: b.question.content,
-                answer: b.question.answer,
-                solution: b.question.solution,
-                type: b.question.type,
-              },
-            };
-          }
-          return { id: b.id, type: b.type, content: b.content };
-        }),
-        mode,
-      };
-
-      const res = await fetch('/api/export/pdf', {
+      // 1. 创建导出任务
+      const createRes = await fetch('/api/export/pdf/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ blocks, mode }),
       });
 
-      if (!res.ok) throw new Error('PDF 生成失败');
+      if (!createRes.ok) {
+        const errData = await createRes.json().catch(() => ({}));
+        throw new Error(errData.error || '创建导出任务失败');
+      }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'exam.pdf';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error('下载 PDF 失败:', err);
-      alert('PDF 生成失败，请检查网络连接后重试');
-    } finally {
-      setIsDownloading(false);
+      const { jobId } = await createRes.json();
+      if (!jobId) throw new Error('未获取到任务 ID');
+
+      // 2. 轮询任务状态（仿教研云：每 1 秒轮询）
+      setExportStatus('polling');
+      const POLL_INTERVAL = 1000;
+      const MAX_POLL_TIME = 120_000; // 最多等 2 分钟
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < MAX_POLL_TIME) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+        const statusRes = await fetch(`/api/export/pdf/status/${jobId}`);
+        if (!statusRes.ok) continue;
+
+        const statusData = await statusRes.json();
+
+        if (statusData.status === 'COMPLETED') {
+          // 3. 下载 PDF
+          setExportStatus('downloading');
+          window.open(statusData.downloadUrl, '_blank');
+          setExportStatus('done');
+          setTimeout(() => setExportStatus('idle'), 3000);
+          return;
+        }
+
+        if (statusData.status === 'FAILED') {
+          throw new Error(statusData.error || 'PDF 生成失败');
+        }
+      }
+
+      throw new Error('PDF 生成超时，请重试');
+    } catch (err: any) {
+      console.error('PDF 导出失败:', err);
+      setExportError(err?.message || '导出失败，请重试');
+      setExportStatus('error');
+      setTimeout(() => { setExportStatus('idle'); setExportError(null); }, 5000);
     }
   };
 
@@ -396,9 +406,14 @@ function PrintPageContent() {
               <Printer className="w-4 h-4 mr-2" />
               打印 / 导出 PDF
             </Button>
-            <Button onClick={handleDownloadPdf} disabled={isDownloading} variant="secondary">
-              <DownloadCloud className="w-4 h-4 mr-2" />
-              {isDownloading ? '生成中...' : '下载 PDF (React-PDF)'}
+            <Button onClick={handleDownloadPdf} disabled={exportStatus !== 'idle'} variant="secondary">
+              <DownloadCloud className={`w-4 h-4 mr-2 ${exportStatus === 'polling' ? 'animate-pulse' : ''}`} />
+              {exportStatus === 'idle' && '下载 PDF (教研云方案)'}
+              {exportStatus === 'creating' && '创建任务中...'}
+              {exportStatus === 'polling' && '正在生成 PDF...'}
+              {exportStatus === 'downloading' && '下载中...'}
+              {exportStatus === 'done' && '下载完成'}
+              {exportStatus === 'error' && (exportError || '导出失败，点击重试')}
             </Button>
           </div>
         </div>

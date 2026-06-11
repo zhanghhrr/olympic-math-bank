@@ -14,7 +14,7 @@ function escapeCsvField(value: string | null | undefined): string {
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
 
@@ -29,18 +29,14 @@ export async function POST(request: NextRequest) {
     const questions = await prisma.question.findMany({
       where: { id: { in: questionIds } },
       include: {
-        knowledgeTags: {
+        knowledgeTag: {
           include: {
-            knowledgeTag: {
+            parent: {
               include: {
                 parent: {
                   include: {
                     parent: {
-                      include: {
-                        parent: {
-                          include: { parent: true },
-                        },
-                      },
+                      include: { parent: true },
                     },
                   },
                 },
@@ -55,16 +51,16 @@ export async function POST(request: NextRequest) {
 
     const headers = ['ID', '题干', '答案', '解析', '题型', '年级', '难度', '状态', '来源', '年份', '竞赛', '知识标签', '创建者', '创建时间'];
     const rows = questions.map(q => {
-      const tagPaths = q.knowledgeTags.map(kt => {
-        const tag = kt.knowledgeTag;
+      const tagPath = (() => {
+        if (!q.knowledgeTag) return '';
         const parts: string[] = [];
-        let current: any = tag;
+        let current: any = q.knowledgeTag;
         while (current) {
           parts.unshift(current.name);
           current = current.parent;
         }
         return parts.join(' > ');
-      }).join('; ');
+      })();
 
       const typeLabels: Record<string, string> = {
         FILL_BLANK: '填空题', CHOICE: '选择题', SOLUTION: '解答题',
@@ -83,7 +79,7 @@ export async function POST(request: NextRequest) {
         q.source || '',
         q.year ? String(q.year) : '',
         q.competition || '',
-        tagPaths,
+        tagPath,
         q.createdBy?.name || '',
         q.createdAt.toISOString(),
       ].map(escapeCsvField).join(',');

@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
 
@@ -17,7 +17,7 @@ export async function GET(
   const versions = await prisma.questionVersion.findMany({
     where: { questionId: id },
     include: {
-      createdBy: { select: { name: true, email: true } },
+      createdBy: { select: { name: true, phone: true } },
     },
     orderBy: { version: 'desc' },
   });
@@ -30,7 +30,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
+  if (!session) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });
   }
 

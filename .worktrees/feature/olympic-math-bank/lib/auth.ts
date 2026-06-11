@@ -8,41 +8,40 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: 'credentials',
       credentials: {
-        email: { label: '邮箱', type: 'email' },
+        phone: { label: '手机号', type: 'text' },
         password: { label: '密码', type: 'password' },
       },
       async authorize(credentials) {
-        console.log('Login attempt:', credentials?.email);
-        if (!credentials?.email || !credentials?.password) {
-          console.log('Missing credentials');
+        if (!credentials?.phone || !credentials?.password) {
+          console.log('Login failed: missing credentials');
           return null;
         }
 
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
+          where: { phone: credentials.phone },
         });
 
         if (!user) {
-          console.log('User not found:', credentials.email);
+          console.log('Login failed: user not found');
           return null;
         }
 
         if (!user.password) {
-          console.log('User has no password:', credentials.email);
+          console.log('Login failed: user has no password set');
           return null;
         }
 
         const isValid = await bcrypt.compare(credentials.password, user.password);
 
         if (!isValid) {
-          console.log('Invalid password for user:', credentials.email);
+          console.log('Login failed: invalid password');
           return null;
         }
 
-        console.log('Login successful:', user.email);
+        console.log('Login successful');
         return {
           id: user.id,
-          email: user.email,
+          phone: user.phone,
           name: user.name,
           role: user.role,
         };
@@ -55,13 +54,17 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        token.id = user.id;
         token.role = (user as any).role;
+        token.phone = (user as any).phone;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
+        (session.user as any).id = token.id;
         (session.user as any).role = token.role;
+        (session.user as any).phone = token.phone;
       }
       return session;
     },

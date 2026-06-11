@@ -14,19 +14,21 @@ interface KnowledgeTagNode {
 interface BatchTagDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (selectedTagIds: string[]) => void;
+  onConfirm: (selectedTagId: string | null) => void;
 }
 
 export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogProps) {
   const [tree, setTree] = useState<KnowledgeTagNode[]>([]);
-  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [searchText, setSearchText] = useState('');
+  const [namespace, setNamespace] = useState('default');
 
   useEffect(() => {
     if (isOpen) {
-      fetch('/api/knowledge-tags/tree')
+      setLoading(true);
+      fetch(`/api/knowledge-tags/tree?namespace=${encodeURIComponent(namespace)}`)
         .then((res) => res.json())
         .then((data) => {
           setTree(data.tree || []);
@@ -35,9 +37,9 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
         .catch(() => setLoading(false));
       // 重置搜索和选中状态
       setSearchText('');
-      setSelectedTagIds(new Set());
+      setSelectedTagId(null);
     }
-  }, [isOpen]);
+  }, [isOpen, namespace]);
 
   const toggleExpand = (id: string) => {
     const newExpanded = new Set(expandedNodes);
@@ -50,23 +52,19 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
   };
 
   const toggleSelect = (id: string) => {
-    const newSelected = new Set(selectedTagIds);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedTagIds(newSelected);
+    setSelectedTagId(selectedTagId === id ? null : id);
   };
 
   const handleConfirm = () => {
-    onConfirm(Array.from(selectedTagIds));
-    setSelectedTagIds(new Set());
+    if (selectedTagId) {
+      onConfirm(selectedTagId);
+    }
+    setSelectedTagId(null);
     onClose();
   };
 
   const handleClose = () => {
-    setSelectedTagIds(new Set());
+    setSelectedTagId(null);
     setExpandedNodes(new Set());
     onClose();
   };
@@ -75,7 +73,7 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
   const renderTreeNode = (node: KnowledgeTagNode, depth: number = 0) => {
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = expandedNodes.has(node.id);
-    const isSelected = selectedTagIds.has(node.id);
+    const isSelected = selectedTagId === node.id;
 
     // 搜索过滤：如果节点名包含搜索词，或子节点有匹配，则显示
     if (searchText.trim()) {
@@ -152,7 +150,7 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
           <div>
             <h3 className="font-semibold text-lg text-foreground">批量打标签</h3>
             <p className="text-sm text-muted-foreground">
-              已选择 {selectedTagIds.size} 个标签（替换现有标签）
+              {selectedTagId ? '已选择 1 个标签（替换现有标签）' : '未选择标签'}
             </p>
           </div>
           <button
@@ -164,12 +162,13 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
         </div>
 
         {/* 搜索框 */}
-        <div className="px-4 pt-3">
-          <input
-            type="text"
-            placeholder="搜索标签名..."
-            value={searchText}
-            onChange={(e) => {
+        <div className="px-4 pt-3 flex gap-3">
+          <div className="flex-1">
+            <input
+              type="text"
+              placeholder="搜索标签名..."
+              value={searchText}
+              onChange={(e) => {
               setSearchText(e.target.value);
               // 搜索时自动展开匹配节点的祖先
               if (e.target.value.trim()) {
@@ -202,7 +201,16 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
               }
             }}
             className="input-field text-sm"
-          />
+            />
+          </div>
+          <select
+            value={namespace}
+            onChange={(e) => { setNamespace(e.target.value); setExpandedNodes(new Set()); }}
+            className="select-field text-sm w-32"
+          >
+            <option value="default">系统标签</option>
+            <option value="散测入学">散测标签</option>
+          </select>
         </div>
 
         {/* Tree Content */}
@@ -219,11 +227,10 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
         </div>
 
         {/* Selected Tags Preview */}
-        {selectedTagIds.size > 0 && (
+        {selectedTagId && (
           <div className="px-4 py-3 border-t border-border bg-muted/30">
             <div className="flex flex-wrap gap-1.5">
-              {Array.from(selectedTagIds).map((id) => {
-                // 找到对应的标签名称
+              {(() => {
                 const findTagName = (nodes: KnowledgeTagNode[], targetId: string): string | null => {
                   for (const node of nodes) {
                     if (node.id === targetId) return node.name;
@@ -234,17 +241,17 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
                   }
                   return null;
                 };
-                const name = findTagName(tree, id) || id;
+                const name = findTagName(tree, selectedTagId) || selectedTagId;
                 return (
                   <span
-                    key={id}
+                    key={selectedTagId}
                     className="inline-flex items-center gap-1 px-2.5 py-1 bg-primary/10 text-primary rounded-full text-xs"
                   >
                     <Tag className="w-3 h-3" />
                     {name}
                   </span>
                 );
-              })}
+              })()}
             </div>
           </div>
         )}
@@ -254,7 +261,7 @@ export function BatchTagDialog({ isOpen, onClose, onConfirm }: BatchTagDialogPro
           <Button variant="outline" onClick={handleClose} className="border-border hover:bg-muted rounded-xl">
             取消
           </Button>
-          <Button onClick={handleConfirm} disabled={selectedTagIds.size === 0} className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl">
+          <Button onClick={handleConfirm} disabled={!selectedTagId} className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl">
             确认打标签
           </Button>
         </div>

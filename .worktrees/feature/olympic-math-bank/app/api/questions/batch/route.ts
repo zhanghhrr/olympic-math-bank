@@ -26,7 +26,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: '缺少更新数据' }, { status: 400 });
     }
 
-    const { content, answer, solution, type, difficulty, grade, status, knowledgeTagIds } = data;
+    const { content, answer, solution, type, difficulty, grade, status, knowledgeTagId } = data;
 
     // 构建更新数据
     const updateData: any = {};
@@ -37,6 +37,7 @@ export async function PATCH(request: NextRequest) {
     if (difficulty !== undefined) updateData.difficulty = difficulty;
     if (grade !== undefined) updateData.grade = grade;
     if (status !== undefined) updateData.status = status;
+    if (knowledgeTagId !== undefined) updateData.knowledgeTagId = knowledgeTagId || null;
 
     // 执行批量更新
     const results = {
@@ -48,25 +49,7 @@ export async function PATCH(request: NextRequest) {
     await prisma.$transaction(async (tx) => {
       for (const id of ids) {
         try {
-          // 如果有知识标签更新，先删除现有标签再创建新的
-          if (knowledgeTagIds !== undefined) {
-            // 删除现有的知识标签关联
-            await tx.questionKnowledgeTag.deleteMany({
-              where: { questionId: id },
-            });
-
-            // 创建新的知识标签关联（替换模式）
-            if (knowledgeTagIds.length > 0) {
-              await tx.questionKnowledgeTag.createMany({
-                data: knowledgeTagIds.map((tagId: string) => ({
-                  questionId: id,
-                  knowledgeTagId: tagId,
-                })),
-              });
-            }
-          }
-
-          // 更新题目基本信息
+          // 更新题目基本信息（知识标签已通过 updateData.knowledgeTagId 直接更新）
           if (Object.keys(updateData).length > 0) {
             await tx.question.update({
               where: { id },
@@ -117,11 +100,6 @@ export async function DELETE(request: NextRequest) {
 
     // 删除题目及其关联数据
     await prisma.$transaction(async (tx) => {
-      // 删除知识标签关联
-      await tx.questionKnowledgeTag.deleteMany({
-        where: { questionId: { in: ids } },
-      });
-
       // 删除普通标签关联
       await tx.questionTag.deleteMany({
         where: { questionId: { in: ids } },

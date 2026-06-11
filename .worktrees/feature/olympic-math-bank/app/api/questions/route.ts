@@ -30,6 +30,8 @@ export async function GET(request: NextRequest) {
   const createdById = searchParams.get('createdById');
   const tagIds = searchParams.get('tagIds');
   const knowledgeTagIds = searchParams.get('knowledgeTagIds');
+  const hasImage = searchParams.get('hasImage') === 'true';
+  const hasSolution = searchParams.get('hasSolution') === 'true';
   const sortBy = searchParams.get('sortBy') || 'updatedAt';
   const sortOrder = (searchParams.get('sortOrder') || 'desc') as 'asc' | 'desc';
 
@@ -90,14 +92,23 @@ export async function GET(request: NextRequest) {
     };
   }
 
-  // 知识标签筛选
+  // 知识标签筛选（单标签：直接按 knowledgeTagId 字段过滤）
   if (knowledgeTagIds) {
     const knowledgeTagIdArray = knowledgeTagIds.split(',');
-    where.knowledgeTags = {
-      some: {
-        knowledgeTagId: { in: knowledgeTagIdArray },
-      },
-    };
+    where.knowledgeTagId = { in: knowledgeTagIdArray };
+  }
+
+  // 有图筛选（content 中包含 Markdown 图片语法 ![](...)
+  if (hasImage) {
+    where.content = { contains: '![](' };
+  }
+
+  // 有解析筛选
+  if (hasSolution) {
+    where.solution = { not: null };
+    // AND solution != '' 通过 notIn 实现
+    where.AND = where.AND || [];
+    (where.AND as any[]).push({ solution: { not: '' } });
   }
 
   const [questions, total] = await Promise.all([
@@ -106,19 +117,15 @@ export async function GET(request: NextRequest) {
       include: {
         createdBy: { select: { name: true } },
         tags: { include: { tag: true } },
-        knowledgeTags: {
+        knowledgeTag: {
           include: {
-            knowledgeTag: {
+            parent: {
               include: {
                 parent: {
                   include: {
                     parent: {
                       include: {
-                        parent: {
-                          include: {
-                            parent: true,
-                          },
-                        },
+                        parent: true,
                       },
                     },
                   },
@@ -154,7 +161,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { content, answer, solution, type, options, grade, difficulty, source, year, competition, tagIds, knowledgeTagIds } = body;
+  const { content, answer, solution, type, options, grade, difficulty, source, year, competition, tagIds, knowledgeTagId } = body;
 
   const question = await prisma.question.create({
     data: {
@@ -170,11 +177,11 @@ export async function POST(request: NextRequest) {
       competition,
       createdById: (session.user as any).id as string,
       tags: tagIds ? { create: tagIds.map((id: string) => ({ tagId: id })) } : undefined,
-      knowledgeTags: knowledgeTagIds ? { create: knowledgeTagIds.map((id: string) => ({ knowledgeTagId: id })) } : undefined,
+      knowledgeTagId: knowledgeTagId || null,
     },
     include: { 
       tags: { include: { tag: true } },
-      knowledgeTags: { include: { knowledgeTag: true } },
+      knowledgeTag: { include: { parent: { include: { parent: { include: { parent: { include: { parent: true } } } } } } } },
     },
   });
 

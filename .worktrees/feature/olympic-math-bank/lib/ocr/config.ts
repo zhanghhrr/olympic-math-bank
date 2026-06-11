@@ -9,6 +9,8 @@ export const OCR_CONFIG = {
     'image/jpeg',
     'image/png',
     'image/webp',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'application/msword', // .doc
   ],
 
   // 最大文件大小 (200MB，MinerU v4 API 上限)

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { BookOpen, ArrowRight, Sparkles } from 'lucide-react';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -20,13 +20,13 @@ export default function LoginPage() {
 
     try {
       const result = await signIn('credentials', {
-        email,
+        phone,
         password,
         redirect: false,
       });
 
       if (result?.error) {
-        setError('登录失败，请检查邮箱和密码');
+        setError('登录失败，请检查手机号和密码');
       } else {
         router.push('/');
         router.refresh();
@@ -63,18 +63,18 @@ export default function LoginPage() {
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="email" className="text-sm font-medium text-foreground">
-                邮箱地址
+              <label htmlFor="phone" className="text-sm font-medium text-foreground">
+                手机号码
               </label>
               <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="phone"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
                 required
-                placeholder="请输入邮箱"
+                placeholder="请输入手机号码"
                 className="input-field"
-                autoComplete="email"
+                autoComplete="tel"
               />
             </div>
 

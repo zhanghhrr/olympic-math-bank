@@ -19,7 +19,7 @@ interface Question {
   year: number | null;
   competition: string | null;
   tags: { tagId: string }[];
-  knowledgeTags: { knowledgeTagId: string }[];
+  knowledgeTagId: string | null;
 }
 
 export default function EditQuestionPage() {
@@ -163,7 +163,7 @@ export default function EditQuestionPage() {
               year: question.year || new Date().getFullYear(),
               competition: question.competition || '',
               tagIds: question.tags.map((t) => t.tagId),
-              knowledgeTagIds: question.knowledgeTags.map((t) => t.knowledgeTagId),
+              knowledgeTagId: question.knowledgeTagId || null,
             }}
             onSubmit={handleSubmit}
             isSubmitting={isSubmitting}

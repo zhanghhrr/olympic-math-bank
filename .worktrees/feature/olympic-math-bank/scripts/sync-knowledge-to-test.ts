@@ -46,7 +46,6 @@ async function syncKnowledgeTree() {
 
     // 清空测试环境的知识标签
     console.log('\n清空测试环境的知识标签...');
-    await testPrisma.questionKnowledgeTag.deleteMany();
     await testPrisma.knowledgeTag.deleteMany();
     console.log('测试环境已清空');
 
@@ -73,6 +72,7 @@ async function syncKnowledgeTree() {
             level: tag.level,
             name: tag.name,
             code: tag.code,
+            namespace: tag.namespace,
             module: tag.module,
             topic: tag.topic,
             subtopic: tag.subtopic,

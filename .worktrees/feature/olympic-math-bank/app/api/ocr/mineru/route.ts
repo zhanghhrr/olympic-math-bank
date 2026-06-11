@@ -8,7 +8,7 @@ import * as path from 'path';
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    if (!session) {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 

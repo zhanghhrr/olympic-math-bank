@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, FileImage, FileText, Loader2, CheckCircle, AlertCircle, Tag, FileCheck, Brain, XCircle } from 'lucide-react';
+import { Upload, FileImage, FileText, Loader2, CheckCircle, AlertCircle, Tag, FileCheck, Brain, XCircle, FileType } from 'lucide-react';
 import { QuestionCard } from '@/components/question/question-card';
 import { BatchTagDialog } from '@/components/knowledge-tag/batch-dialog';
 
@@ -50,7 +50,7 @@ const stageInfo: Record<ImportStage, { label: string; description: string; icon:
 };
 
 export default function ImportPage() {
-  const [activeTab, setActiveTab] = useState<'image' | 'pdf'>('pdf');
+  const [activeTab, setActiveTab] = useState<'image' | 'pdf' | 'docx'>('pdf');
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [currentStage, setCurrentStage] = useState<ImportStage>('uploading');
@@ -102,7 +102,8 @@ export default function ImportPage() {
 
     const formData = new FormData();
 
-    if (activeTab === 'pdf') {
+    if (activeTab === 'pdf' || activeTab === 'image' || activeTab === 'docx') {
+      // PDF / 图片 / DOCX 统一走 OCR 智能导入流水线
       setCurrentStage('uploading');
 
       if (asyncMode) {
@@ -117,7 +118,7 @@ export default function ImportPage() {
           const data = await res.json();
           if (res.ok && data.jobId) {
             setPdfUrl(data.pdfUrl || null);
-            // 轮询任务状态：最多100次（5分钟），连续3次失败才终止
+            // 轮询任务状态
             let pollCount = 0;
             let consecutiveFailures = 0;
             const MAX_POLLS = 100;
@@ -128,7 +129,7 @@ export default function ImportPage() {
                 pollCount++;
                 const statusRes = await fetch(`/api/import/ocr/async?jobId=${data.jobId}`);
                 const statusData = await statusRes.json();
-                consecutiveFailures = 0; // 成功后重置连续失败计数
+                consecutiveFailures = 0;
 
                 if (statusData.status === 'COMPLETED') {
                   clearInterval(pollInterval);
@@ -151,7 +152,6 @@ export default function ImportPage() {
                     questions: [],
                   });
                 } else {
-                  // 超过最大轮询次数
                   if (pollCount >= MAX_POLLS) {
                     clearInterval(pollInterval);
                     setUploading(false);
@@ -159,22 +159,17 @@ export default function ImportPage() {
                     setResult({ success: false, message: '处理超时，请稍后重试', questions: [] });
                     return;
                   }
-                  // 根据后端实际数据更新阶段和进度
                   const total = statusData.totalItems || 0;
                   const processed = statusData.processedItems || 0;
                   if (total > 0) {
-                    // OCR 已完成，正在标签匹配
                     setCurrentStage('tagging');
                     if (processed >= total) {
                       setStageProgress(95);
                     } else {
-                      // 标签匹配占 60%~95%
                       setStageProgress(60 + Math.round((processed / total) * 35));
                     }
                   } else {
-                    // OCR 识别进行中
                     setCurrentStage('ocr');
-                    // OCR 阶段显示缓慢递增（无精确进度可参考）
                     setStageProgress(prev => Math.min(prev + 1, 55));
                   }
                 }
@@ -203,19 +198,17 @@ export default function ImportPage() {
         return;
       }
 
+      // 同步模式
       formData.append('file', files[0]);
       formData.append('autoMatchTags', autoMatchTags.toString());
       formData.append('grade', selectedGrade);
-
-      // 显示上传+识别阶段，由服务器端实际耗时驱动
-      setStageProgress(10); // 开始上传
+      setStageProgress(10);
 
       try {
         const res = await fetch('/api/import/ocr', {
           method: 'POST',
           body: formData,
         });
-
         setStageProgress(100);
 
         const data = await res.json();
@@ -244,38 +237,6 @@ export default function ImportPage() {
         setResult({
           success: false,
           message: '网络错误，请重试',
-          questions: [],
-        });
-      }
-    } else {
-      // 图片导入（原有逻辑）
-      files.forEach(file => formData.append('files', file));
-      formData.append('type', activeTab);
-
-      try {
-        const res = await fetch('/api/import', {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (res.ok) {
-          setResult({
-            success: true,
-            message: '上传成功！请在导入任务页面查看进度',
-            questions: [],
-          });
-          setFiles([]);
-        } else {
-          setResult({
-            success: false,
-            message: '上传失败',
-            questions: [],
-          });
-        }
-      } catch (error) {
-        setResult({
-          success: false,
-          message: '上传出错',
           questions: [],
         });
       }
@@ -341,8 +302,8 @@ export default function ImportPage() {
   };
 
   // 批量打标签
-  const handleBatchTag = async (tagIds: string[]) => {
-    if (selectedIds.size === 0) return;
+  const handleBatchTag = async (tagId: string | null) => {
+    if (!tagId || selectedIds.size === 0) return;
 
     try {
       const res = await fetch('/api/questions/batch', {
@@ -350,7 +311,7 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ids: Array.from(selectedIds),
-          data: { knowledgeTagIds: tagIds },
+          data: { knowledgeTagId: tagId },
         }),
       });
 
@@ -360,7 +321,7 @@ export default function ImportPage() {
             selectedIds.has(q.id)
               ? {
                   ...q,
-                  matchedTags: tagIds.map(id => ({ id, name: '已选标签', path: '' })),
+                  matchedTags: [{ id: tagId, name: '已选标签', path: '' }],
                 }
               : q
           )
@@ -477,6 +438,8 @@ export default function ImportPage() {
             setActiveTab('image');
             setFiles([]);
             setResult(null);
+            setQuestions([]);
+            setSelectedIds(new Set());
           }}
           className={`px-4 py-3 font-medium transition-colors ${
             activeTab === 'image'
@@ -487,11 +450,27 @@ export default function ImportPage() {
           <FileImage className="w-4 h-4 inline mr-2" />
           图片导入
         </button>
+        <button
+          onClick={() => {
+            setActiveTab('docx');
+            setFiles([]);
+            setResult(null);
+            setQuestions([]);
+            setSelectedIds(new Set());
+          }}
+          className={`px-4 py-3 font-medium transition-colors ${
+            activeTab === 'docx'
+              ? 'border-b-2 border-primary text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <FileType className="w-4 h-4 inline mr-2" />
+          Word导入
+        </button>
       </div>
 
-      {/* PDF导入选项 */}
-      {activeTab === 'pdf' && (
-        <div className="bg-primary/5 p-5 rounded-xl border border-primary/10 space-y-4">
+      {/* 导入选项（所有格式通用） */}
+      <div className="bg-primary/5 p-5 rounded-xl border border-primary/10 space-y-4">
           <div className="flex items-center gap-2 mb-3">
             <Tag className="w-4 h-4 text-primary" />
             <span className="font-medium text-foreground">导入选项</span>
@@ -540,7 +519,6 @@ export default function ImportPage() {
             </span>
           </label>
         </div>
-      )}
 
 
 
@@ -551,13 +529,18 @@ export default function ImportPage() {
             <Upload className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
             <p className="text-foreground mb-4">
               {activeTab === 'image'
-                ? '选择图片文件（支持 JPG、PNG）'
-                : '选择 PDF 文件（系统会自动识别题目并打标签）'}
+                ? '选择图片文件（支持 JPG、PNG、WebP）'
+                : activeTab === 'docx'
+                  ? '选择 Word 文档（支持 .docx / .doc）'
+                  : '选择 PDF 文件（系统会自动识别题目并打标签）'}
             </p>
             <input
               type="file"
-              accept={activeTab === 'image' ? 'image/*' : '.pdf'}
-              multiple={activeTab === 'image'}
+              accept={
+                activeTab === 'image' ? 'image/*' :
+                activeTab === 'docx' ? '.docx,.doc' :
+                '.pdf'
+              }
               onChange={handleFileSelect}
               className="hidden"
               id="file-input"
@@ -584,7 +567,7 @@ export default function ImportPage() {
               ))}
             </ul>
 
-            {uploading && activeTab === 'pdf' && (
+            {uploading && activeTab !== 'image' && (
               <div className="mt-6 space-y-4">
                 {/* 进度条 */}
                 <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
@@ -607,7 +590,7 @@ export default function ImportPage() {
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {currentStage === 'ocr'
-                        ? '正在调用 MinerU API 进行 PDF 文字识别与题目分割...'
+                        ? '正在调用 MinerU API 进行文字识别与题目分割...'
                         : currentStage === 'tagging'
                           ? `正在匹配知识标签...`
                           : stageInfo[currentStage].description}
@@ -654,24 +637,15 @@ export default function ImportPage() {
               </div>
             )}
 
-            {uploading && activeTab === 'image' && (
-              <div className="mt-4">
-                <div className="flex items-center gap-2 text-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>正在上传图片，请稍候...</span>
-                </div>
-              </div>
-            )}
-
             <div className="mt-4 flex gap-2">
               <Button onClick={handleUpload} disabled={uploading} className="bg-primary hover:bg-primary-hover text-primary-foreground rounded-xl">
                 {uploading ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    {activeTab === 'pdf' ? '智能导入中...' : '上传中...'}
+                    {activeTab === 'docx' ? '智能导入中...' : activeTab === 'image' ? '智能识别中...' : '智能导入中...'}
                   </>
                 ) : (
-                  activeTab === 'pdf' ? '开始智能导入' : '开始上传'
+                  '开始智能导入'
                 )}
               </Button>
               <Button
@@ -865,11 +839,21 @@ export default function ImportPage() {
               <li><strong>预览编辑</strong>：识别后您可以手动调整标签、修改题目内容，确认无误后点击"确认导入"</li>
               <li>建议PDF清晰，文字内容完整可见，处理时间约30秒-2分钟</li>
             </>
+          ) : activeTab === 'docx' ? (
+            <>
+              <li><strong>Word智能导入</strong>：上传 .docx / .doc 文件，系统自动转换为 PDF 后进行 OCR 识别</li>
+              <li>支持包含公式、表格的 Word 文档（需服务器已安装 LibreOffice 以进行格式转换）</li>
+              <li>自动根据题目内容匹配五级知识标签（模块→专题→子专题→知识点→技能）</li>
+              <li><strong>预览编辑</strong>：识别后您可以手动调整标签、修改题目内容，确认无误后点击"确认导入"</li>
+              <li>若未安装 LibreOffice，将尝试直接提交 DOCX 到 MinerU 识别引擎</li>
+            </>
           ) : (
             <>
-              <li><strong>图片导入</strong>：支持批量上传多个题目图片</li>
-              <li>上传后系统会进行OCR识别，请在识别结果页面核对</li>
-              <li>建议图片清晰，文字内容完整可见</li>
+              <li><strong>图片导入</strong>：上传题目图片，系统自动进行 OCR 识别、题目识别和标签匹配</li>
+              <li>支持 JPG、PNG、WebP 格式，建议图片清晰、文字完整可见</li>
+              <li>自动根据题目内容匹配五级知识标签（模块→专题→子专题→知识点→技能）</li>
+              <li><strong>预览编辑</strong>：识别后您可以手动调整标签、修改题目内容，确认无误后点击"确认导入"</li>
+              <li>处理时间约 30 秒 - 2 分钟，取决于图片大小和 MinerU API 负载</li>
             </>
           )}
         </ul>

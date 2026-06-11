@@ -1,13 +1,18 @@
 /**
  * 完整导入→导出流程脚本
- * 用法: npx tsx scripts/import_and_export.ts
+ * 用法: 
+ *   设置环境变量后运行:
+ *     $env:TEST_PHONE="手机号"; $env:TEST_PASSWORD="密码"; npx tsx scripts/import_and_export.ts
  */
 import * as fs from 'fs';
 import * as path from 'path';
 
 const BASE = 'http://localhost:3000';
 const PDF_PATH = 'C:\\Users\\Twilight\\Desktop\\【26春季】三年级第十二周刷题课(教师版).pdf';
-const CREDENTIALS = { email: 'admin@example.com', password: 'admin123' };
+const CREDENTIALS = {
+  phone: process.env.TEST_PHONE || '',
+  password: process.env.TEST_PASSWORD || '',
+};
 
 let sessionCookie = '';
 
@@ -49,7 +54,7 @@ async function login(): Promise<void> {
   // 2. 发送登录请求，带上 CSRF cookie
   const params = new URLSearchParams();
   params.append('csrfToken', csrfToken);
-  params.append('email', CREDENTIALS.email);
+  params.append('phone', CREDENTIALS.phone);
   params.append('password', CREDENTIALS.password);
 
   const loginRes = await fetch(`${BASE}/api/auth/callback/credentials`, {

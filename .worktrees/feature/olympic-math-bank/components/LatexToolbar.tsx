@@ -2,7 +2,16 @@
 
 import { Button } from '@/components/ui/button';
 import katex from 'katex';
+import { LATEX_MACROS } from '@/lib/latex/macros';
 import { Bold, AlignLeft, AlignCenter, AlignRight, ImageIcon } from 'lucide-react';
+
+/** 工具栏预览渲染配置 */
+const TOOLBAR_OPTIONS: Omit<katex.KatexOptions, 'displayMode'> = {
+  throwOnError: false,
+  strict: false,
+  macros: LATEX_MACROS,
+  trust: true,
+};
 
 interface LatexToolbarProps {
   onInsert: (text: string) => void;
@@ -10,10 +19,10 @@ interface LatexToolbarProps {
   showImageButton?: boolean;
 }
 
-// 渲染 LaTeX 到 HTML
+// 渲染 LaTeX 到 HTML（仅用于工具栏图标预览）
 function renderLatexToHtml(latex: string, displayMode: boolean = false): string {
   try {
-    return katex.renderToString(latex.trim(), { displayMode, throwOnError: false });
+    return katex.renderToString(latex.trim(), { ...TOOLBAR_OPTIONS, displayMode });
   } catch {
     return displayMode ? `$$${latex}$$` : `$${latex}$`;
   }

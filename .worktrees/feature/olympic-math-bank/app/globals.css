@@ -347,6 +347,17 @@ html {
   border: 1px solid hsl(270 40% 88%);
 }
 
+/* 填空题下划线占位符：____ 渲染为可见下划线 */
+.fill-blank {
+  display: inline-block;
+  min-width: 2em;
+  border-bottom: 1.5px solid var(--color-foreground);
+  margin: 0 0.15em;
+  vertical-align: baseline;
+  position: relative;
+  bottom: -0.1em;
+}
+
 .type-choice {
   background: hsl(221 60% 94%);
   color: hsl(221 55% 45%);
@@ -420,6 +431,13 @@ html {
   border-radius: var(--radius-lg);
   overflow-x: auto;
   border: 1px solid var(--color-border-light);
+}
+
+/* 内联公式：\displaystyle 注入后可能产生很宽的公式，需要溢出滚动 */
+.katex {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .latex-inline {

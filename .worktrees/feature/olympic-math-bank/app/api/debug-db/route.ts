@@ -1,8 +1,19 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/db/prisma';
 import path from 'path';
 
 export async function GET() {
+  // 仅管理员可访问调试接口
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: '未登录' }, { status: 401 });
+  }
+  if ((session.user as any).role !== 'ADMIN') {
+    return NextResponse.json({ error: '无权限' }, { status: 403 });
+  }
+
   // 获取实际的数据库URL
   const dbPath = process.env.DATABASE_URL || 'file:./lib/db/dev.db';
   let actualDbUrl = dbPath;
@@ -14,7 +25,7 @@ export async function GET() {
   }
 
   const count = await prisma.knowledgeTag.count();
-  const qktCount = await prisma.questionKnowledgeTag.count();
+  const qktCount = await prisma.question.count({ where: { knowledgeTagId: { not: null } } });
   const topTags = await prisma.knowledgeTag.findMany({
     where: { parentId: null },
     select: { id: true, name: true }
@@ -29,7 +40,7 @@ export async function GET() {
     });
     const allIds = [tag.id, ...childIds.map(c => c.id)];
 
-    const qktForModule = await prisma.questionKnowledgeTag.count({
+    const qktForModule = await prisma.question.count({
       where: { knowledgeTagId: { in: allIds } }
     });
     topModuleCounts[tag.name] = qktForModule;
