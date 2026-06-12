@@ -58,6 +58,10 @@ async function importKnowledgeTree() {
       let currentName = moduleName;
       let currentCode = moduleName;
 
+      // 追踪前一层级 code，用于确定父节点
+      // 不再用 lastIndexOf('-') 解析，因为标签名本身可能含 '-'（如"2-1-0 积分制"）
+      let prevLevelCode: string | null = null;
+
       // 逐级创建/获取节点
       for (let level = 1; level <= 5; level++) {
         // 确定当前级别的名称和code
@@ -84,16 +88,15 @@ async function importKnowledgeTree() {
         // 检查是否已创建
         if (createdNodes.has(currentCode)) {
           currentLevel = level;
+          prevLevelCode = currentCode;
           continue;
         }
 
-        // 获取父节点ID
+        // 获取父节点ID：使用 prevLevelCode 而非解析 code 字符串
+        // 因为标签名可能含 '-' 字符（如"2-1-0 积分制"），lastIndexOf('-') 会找错位置
         let parentId: string | null = null;
-        if (level > 1) {
-          const parentCode = currentCode.substring(0, currentCode.lastIndexOf('-'));
-          if (createdNodes.has(parentCode)) {
-            parentId = createdNodes.get(parentCode)!;
-          }
+        if (level > 1 && prevLevelCode) {
+          parentId = createdNodes.get(prevLevelCode) || null;
         }
 
         // 创建节点
@@ -116,6 +119,7 @@ async function importKnowledgeTree() {
         createdNodes.set(currentCode, createdTag.id);
         importedCount++;
         currentLevel = level;
+        prevLevelCode = currentCode;
 
         // 打印进度
         if (importedCount % 100 === 0) {
